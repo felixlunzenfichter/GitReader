@@ -15,7 +15,7 @@ export class SpiralLayout extends BaseScriptComponent {
   readonly PANEL_Y = 0;             // cm — eye level
 
   // --- Text ---
-  readonly FONT_SIZE = 48;
+  readonly FONT_SIZE = 70;
   readonly LINE_HEIGHT = 2;         // cm — vertical spacing between lines (tune this)
   readonly PANEL_WIDTH = 50;        // cm — worldSpaceRect half-width
 
@@ -58,10 +58,11 @@ export class SpiralLayout extends BaseScriptComponent {
   }
 
   private colorForLine(line: string): vec4 {
-    if (line.startsWith('@@')) return new vec4(0.3, 0.8, 0.9, 1); // cyan  — hunk header
-    if (line.startsWith('+'))  return new vec4(0.3, 0.9, 0.3, 1); // green — addition
-    if (line.startsWith('-'))  return new vec4(0.9, 0.3, 0.3, 1); // red   — deletion
-    return new vec4(0.85, 0.85, 0.85, 1);                         // gray  — context
+    if (line.startsWith('#'))  return new vec4(0.7, 0.4, 0.9, 1); // purple — metadata header
+    if (line.startsWith('@@')) return new vec4(0.3, 0.8, 0.9, 1); // cyan   — hunk header
+    if (line.startsWith('+'))  return new vec4(0.3, 0.9, 0.3, 1); // green  — addition
+    if (line.startsWith('-'))  return new vec4(0.9, 0.3, 0.3, 1); // red    — deletion
+    return new vec4(0.85, 0.85, 0.85, 1);                         // gray   — context
   }
 
   private clearPanels() {

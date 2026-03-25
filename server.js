@@ -16,29 +16,67 @@ function getRepoPath() {
   }
 }
 
-// --- Get git diff from repo ---
+// --- Git helpers ---
+function gitExec(cmd, repoPath) {
+  return execSync(cmd, { cwd: repoPath, maxBuffer: 1024 * 1024, timeout: 5000 }).toString().trim();
+}
+
 function getGitDiff(repoPath) {
   try {
-    // Staged + unstaged changes against HEAD
-    let diff = execSync("git diff HEAD", {
-      cwd: repoPath,
-      maxBuffer: 1024 * 1024,
-      timeout: 5000,
-    }).toString();
+    const branch = gitExec("git rev-parse --abbrev-ref HEAD", repoPath);
+    const repoName = path.basename(repoPath);
 
-    // If no uncommitted changes, show last commit's diff
-    if (diff.trim().length === 0) {
-      diff = execSync("git diff HEAD~1 HEAD", {
-        cwd: repoPath,
-        maxBuffer: 1024 * 1024,
-        timeout: 5000,
-      }).toString();
+    // Always: current branch versus main
+    const diff = gitExec("git diff main...HEAD", repoPath);
+
+    if (diff.length === 0) {
+      return `[No diff: ${branch} is identical to main]`;
     }
 
-    if (diff.trim().length === 0) {
-      return `[No changes in ${path.basename(repoPath)}]`;
+    // List local branches
+    const localBranches = gitExec("git branch --format='%(refname:short)'", repoPath)
+      .split("\n")
+      .filter((b) => b);
+
+    // List remote branches (strip "origin/" prefix, exclude HEAD)
+    const remoteBranches = gitExec("git branch -r --format='%(refname:short)'", repoPath)
+      .split("\n")
+      .map((b) => b.replace("origin/", ""))
+      .filter((b) => b && b !== "HEAD" && b !== "origin");
+
+    // List open PRs via gh CLI
+    let prLines = [];
+    try {
+      const prJson = gitExec("/usr/local/bin/gh pr list --state open --json number,title,headRefName --limit 20", repoPath);
+      const prs = JSON.parse(prJson);
+      if (prs.length > 0) {
+        prLines = [
+          `# OPEN PRs:`,
+          ...prs.map((pr) => `#   #${pr.number} ${pr.title} (${pr.headRefName})`),
+        ];
+      } else {
+        prLines = [`# OPEN PRs: none`];
+      }
+    } catch {
+      prLines = [`# OPEN PRs: (gh unavailable)`];
     }
-    return diff;
+
+    const header = [
+      `# REPO: ${repoName}`,
+      `# BRANCH: ${branch}`,
+      `# vs: main`,
+      `#`,
+      `# LOCAL BRANCHES:`,
+      ...localBranches.map((b) => `#   ${b}`),
+      `#`,
+      `# REMOTE BRANCHES:`,
+      ...remoteBranches.map((b) => `#   ${b}`),
+      `#`,
+      ...prLines,
+      `#`,
+    ].join("\n");
+
+    return header + "\n" + diff;
   } catch (err) {
     return `[git diff error: ${err.message}]`;
   }
