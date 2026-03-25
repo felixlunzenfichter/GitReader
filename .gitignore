@@ -1,0 +1,5 @@
+Cache/
+node_modules/
+*.lock
+PluginsUserPreferences/
+Workspaces/
