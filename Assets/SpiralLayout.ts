@@ -16,7 +16,7 @@ export class SpiralLayout extends BaseScriptComponent {
 
   // --- Text ---
   readonly FONT_SIZE = 48;
-  readonly LINE_HEIGHT = 3.5;       // cm — vertical spacing between lines (tune this)
+  readonly LINE_HEIGHT = 2;         // cm — vertical spacing between lines (tune this)
   readonly PANEL_WIDTH = 50;        // cm — worldSpaceRect half-width
 
   // --- WebSocket ---
