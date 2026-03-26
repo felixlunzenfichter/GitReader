@@ -1,5 +1,6 @@
 const { execSync } = require("child_process");
 const path = require("path");
+const fs = require("fs");
 
 const REPOSITORIES = [
   {
@@ -64,10 +65,27 @@ function getGitDiff(repoPath, repoLabel) {
     const committed = gitExec("git diff main...HEAD", repoPath);
     const staged = gitExec("git diff --cached", repoPath);
     const unstaged = gitExec("git diff", repoPath);
-    const untracked = gitExec("git status --porcelain", repoPath)
+    const untracked = gitExec("git status --porcelain --untracked-files=all", repoPath)
       .split("\n")
       .filter((l) => l.startsWith("??"))
       .map((l) => l.slice(3));
+
+    const untrackedWithContent = untracked.map((relPath) => {
+      const absPath = path.join(repoPath, relPath);
+      let content = "[unreadable]";
+      try {
+        const stat = fs.statSync(absPath);
+        if (!stat.isFile()) {
+          content = "[not a regular file]";
+        } else {
+          const raw = fs.readFileSync(absPath, "utf8");
+          content = raw.length > 4000 ? raw.slice(0, 4000) + "\n...[truncated]" : raw;
+        }
+      } catch {
+        content = "[read failed]";
+      }
+      return `+  ${relPath}\n-----\n${content}\n-----`;
+    });
 
     const sections = [
       header,
@@ -79,6 +97,8 @@ function getGitDiff(repoPath, repoLabel) {
       unstaged || `[Clean working tree]`,
       `# Untracked Files`,
       untracked.length > 0 ? untracked.map((f) => `+  ${f}`).join("\n") : `[None]`,
+      `# Untracked File Contents`,
+      untrackedWithContent.length > 0 ? untrackedWithContent.join("\n") : `[None]`,
     ];
 
     return sections.join("\n");
