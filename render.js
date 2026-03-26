@@ -11,6 +11,10 @@ const REPOSITORIES = [
     label: "ClawContraw",
     repoPath: "/Users/felixlunzenfichter/Documents/ClawContraw",
   },
+  {
+    label: "Governance",
+    repoPath: "/Users/felixlunzenfichter/.openclaw/workspace",
+  },
 ];
 
 function gitExec(cmd, repoPath) {
