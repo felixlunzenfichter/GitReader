@@ -1,11 +1,9 @@
 const { WebSocketServer } = require("ws");
 const { execSync } = require("child_process");
-const fs = require("fs");
 const path = require("path");
 
 const PORT = 9876;
 const POLL_INTERVAL = 2000; // ms
-const WATCHED_REPO_FILE = path.join(require("os").homedir(), ".watched-repo");
 
 // Concrete repositories (required)
 const REPOSITORIES = [
@@ -18,15 +16,6 @@ const REPOSITORIES = [
     repoPath: "/Users/felixlunzenfichter/Documents/ClawContraw",
   },
 ];
-
-// --- Read watched repo path (kept for backward compatibility; no longer used for rendering) ---
-function getRepoPath() {
-  try {
-    return fs.readFileSync(WATCHED_REPO_FILE, "utf-8").trim();
-  } catch {
-    return null;
-  }
-}
 
 // --- Git helpers ---
 function gitExec(cmd, repoPath) {
@@ -114,7 +103,6 @@ const wss = new WebSocketServer({ port: PORT });
 let lastDiff = "";
 
 console.log(`WebSocket server on ws://0.0.0.0:${PORT}`);
-console.log(`Watching repo from: ${WATCHED_REPO_FILE}`);
 console.log(`Poll interval: ${POLL_INTERVAL}ms`);
 console.log("Configured repositories:");
 for (const repo of REPOSITORIES) {
