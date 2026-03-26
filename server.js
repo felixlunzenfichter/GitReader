@@ -1,11 +1,9 @@
 const { WebSocketServer } = require("ws");
 const { execSync } = require("child_process");
-const fs = require("fs");
 const path = require("path");
 
 const PORT = 9876;
 const POLL_INTERVAL = 2000; // ms
-const WATCHED_REPO_FILE = path.join(require("os").homedir(), ".watched-repo");
 
 // Concrete repositories (required)
 const REPOSITORIES = [
@@ -14,19 +12,10 @@ const REPOSITORIES = [
     repoPath: "/Users/felixlunzenfichter/Documents/GitReader",
   },
   {
-    label: "OpenCLoud",
-    repoPath: "/Users/felixlunzenfichter/Documents/OpenCLoud",
+    label: "ClawContraw",
+    repoPath: "/Users/felixlunzenfichter/Documents/ClawContraw",
   },
 ];
-
-// --- Read watched repo path (kept for backward compatibility; no longer used for rendering) ---
-function getRepoPath() {
-  try {
-    return fs.readFileSync(WATCHED_REPO_FILE, "utf-8").trim();
-  } catch {
-    return null;
-  }
-}
 
 // --- Git helpers ---
 function gitExec(cmd, repoPath) {
@@ -38,25 +27,16 @@ function getGitDiff(repoPath, repoLabel) {
     const branch = gitExec("git rev-parse --abbrev-ref HEAD", repoPath);
     const repoName = repoLabel || path.basename(repoPath);
 
-    // Always: current branch versus main
-    const diff = gitExec("git diff main...HEAD", repoPath);
-
-    if (diff.length === 0) {
-      return `[No diff: ${branch} is identical to main]`;
-    }
-
-    // List local branches
+    // Metadata — always computed
     const localBranches = gitExec("git branch --format='%(refname:short)'", repoPath)
       .split("\n")
       .filter((b) => b);
 
-    // List remote branches (strip "origin/" prefix, exclude HEAD)
     const remoteBranches = gitExec("git branch -r --format='%(refname:short)'", repoPath)
       .split("\n")
       .map((b) => b.replace("origin/", ""))
       .filter((b) => b && b !== "HEAD" && b !== "origin");
 
-    // List open PRs via gh CLI
     let prLines = [];
     try {
       const prJson = gitExec("/usr/local/bin/gh pr list --state open --json number,title,headRefName --limit 20", repoPath);
@@ -74,7 +54,7 @@ function getGitDiff(repoPath, repoLabel) {
     }
 
     const header = [
-      `# REPO: ${repoName}`,
+      `# Repository: ${repoName}`,
       `# BRANCH: ${branch}`,
       `# vs: main`,
       `#`,
@@ -88,11 +68,26 @@ function getGitDiff(repoPath, repoLabel) {
       `#`,
     ].join("\n");
 
-    return header + "\n" + diff;
+    // Three change layers
+    const committed = gitExec("git diff main...HEAD", repoPath);
+    const staged = gitExec("git diff --cached", repoPath);
+    const unstaged = gitExec("git diff", repoPath);
+
+    const sections = [
+      header,
+      `# Committed (branch vs main)`,
+      committed || `[No changes]`,
+      `# Staged`,
+      staged || `[Nothing staged]`,
+      `# Unstaged`,
+      unstaged || `[Clean working tree]`,
+    ];
+
+    return sections.join("\n");
   } catch (err) {
     const repoName = repoLabel || path.basename(repoPath);
     return [
-      `# REPO: ${repoName}`,
+      `# Repository: ${repoName}`,
       `# PATH: ${repoPath}`,
       `# ERROR: ${err.message}`,
       `[git diff error: ${err.message}]`,
@@ -102,7 +97,7 @@ function getGitDiff(repoPath, repoLabel) {
 
 function renderAllRepositories() {
   const repositoriesList = [
-    "# Repositories:",
+    "# All Repositories",
     ...REPOSITORIES.map((repo, index) => `# ${index + 1}. ${repo.label}`),
     "#",
   ].join("\n");
@@ -116,7 +111,6 @@ const wss = new WebSocketServer({ port: PORT });
 let lastDiff = "";
 
 console.log(`WebSocket server on ws://0.0.0.0:${PORT}`);
-console.log(`Watching repo from: ${WATCHED_REPO_FILE}`);
 console.log(`Poll interval: ${POLL_INTERVAL}ms`);
 console.log("Configured repositories:");
 for (const repo of REPOSITORIES) {
