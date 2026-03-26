@@ -68,14 +68,22 @@ function getGitDiff(repoPath, repoLabel) {
       `#`,
     ].join("\n");
 
-    // Diff — conditional
-    const diff = gitExec("git diff main...HEAD", repoPath);
+    // Three change layers
+    const committed = gitExec("git diff main...HEAD", repoPath);
+    const staged = gitExec("git diff --cached", repoPath);
+    const unstaged = gitExec("git diff", repoPath);
 
-    if (diff.length === 0) {
-      return header + "\n" + `[No diff: ${branch} is identical to main]`;
-    }
+    const sections = [
+      header,
+      `# Committed (branch vs main)`,
+      committed || `[No changes]`,
+      `# Staged`,
+      staged || `[Nothing staged]`,
+      `# Unstaged`,
+      unstaged || `[Clean working tree]`,
+    ];
 
-    return header + "\n" + diff;
+    return sections.join("\n");
   } catch (err) {
     const repoName = repoLabel || path.basename(repoPath);
     return [
