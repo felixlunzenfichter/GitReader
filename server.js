@@ -14,8 +14,8 @@ const REPOSITORIES = [
     repoPath: "/Users/felixlunzenfichter/Documents/GitReader",
   },
   {
-    label: "OpenCLoud",
-    repoPath: "/Users/felixlunzenfichter/Documents/OpenCLoud",
+    label: "ClawContraw",
+    repoPath: "/Users/felixlunzenfichter/Documents/ClawContraw",
   },
 ];
 
@@ -38,25 +38,16 @@ function getGitDiff(repoPath, repoLabel) {
     const branch = gitExec("git rev-parse --abbrev-ref HEAD", repoPath);
     const repoName = repoLabel || path.basename(repoPath);
 
-    // Always: current branch versus main
-    const diff = gitExec("git diff main...HEAD", repoPath);
-
-    if (diff.length === 0) {
-      return `[No diff: ${branch} is identical to main]`;
-    }
-
-    // List local branches
+    // Metadata — always computed
     const localBranches = gitExec("git branch --format='%(refname:short)'", repoPath)
       .split("\n")
       .filter((b) => b);
 
-    // List remote branches (strip "origin/" prefix, exclude HEAD)
     const remoteBranches = gitExec("git branch -r --format='%(refname:short)'", repoPath)
       .split("\n")
       .map((b) => b.replace("origin/", ""))
       .filter((b) => b && b !== "HEAD" && b !== "origin");
 
-    // List open PRs via gh CLI
     let prLines = [];
     try {
       const prJson = gitExec("/usr/local/bin/gh pr list --state open --json number,title,headRefName --limit 20", repoPath);
@@ -74,7 +65,7 @@ function getGitDiff(repoPath, repoLabel) {
     }
 
     const header = [
-      `# REPO: ${repoName}`,
+      `# Repository: ${repoName}`,
       `# BRANCH: ${branch}`,
       `# vs: main`,
       `#`,
@@ -88,11 +79,18 @@ function getGitDiff(repoPath, repoLabel) {
       `#`,
     ].join("\n");
 
+    // Diff — conditional
+    const diff = gitExec("git diff main...HEAD", repoPath);
+
+    if (diff.length === 0) {
+      return header + "\n" + `[No diff: ${branch} is identical to main]`;
+    }
+
     return header + "\n" + diff;
   } catch (err) {
     const repoName = repoLabel || path.basename(repoPath);
     return [
-      `# REPO: ${repoName}`,
+      `# Repository: ${repoName}`,
       `# PATH: ${repoPath}`,
       `# ERROR: ${err.message}`,
       `[git diff error: ${err.message}]`,
@@ -102,7 +100,7 @@ function getGitDiff(repoPath, repoLabel) {
 
 function renderAllRepositories() {
   const repositoriesList = [
-    "# Repositories:",
+    "# All Repositories",
     ...REPOSITORIES.map((repo, index) => `# ${index + 1}. ${repo.label}`),
     "#",
   ].join("\n");
