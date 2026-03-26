@@ -91,14 +91,37 @@ function getGitDiff(repoPath, repoLabel) {
       return `+  ${relPath}\n-----\n${content}\n-----`;
     });
 
+    const unstagedFiles = gitExec("git diff --name-only", repoPath)
+      .split("\n")
+      .filter((f) => f);
+
+    const unstagedFullContent = unstagedFiles.map((relPath) => {
+      const absPath = path.join(repoPath, relPath);
+      let content = "[unreadable]";
+      try {
+        const stat = fs.statSync(absPath);
+        if (!stat.isFile()) {
+          content = "[not a regular file]";
+        } else {
+          const raw = fs.readFileSync(absPath, "utf8");
+          content = raw.length > 4000 ? raw.slice(0, 4000) + "\n...[truncated]" : raw;
+        }
+      } catch {
+        content = "[read failed]";
+      }
+      return `~  ${relPath}\n-----\n${content}\n-----`;
+    });
+
     const sections = [
       header,
       `# Committed (branch vs main)`,
       committed || `[No changes]`,
       `# Staged`,
       staged || `[Nothing staged]`,
-      `# Unstaged`,
+      `# Unstaged (diff)`,
       unstaged || `[Clean working tree]`,
+      `# Unstaged (full files)`,
+      unstagedFullContent.length > 0 ? unstagedFullContent.join("\n") : `[None]`,
       `# Untracked Files`,
       untracked.length > 0 ? untracked.map((f) => `+  ${f}`).join("\n") : `[None]`,
       `# Untracked File Contents`,
