@@ -7,7 +7,6 @@ final class WebSocketClient {
     var lines: [String] = []
     var isConnected: Bool = false
 
-    private var webSocketTask: URLSessionWebSocketTask?
     private let serverURL: URL
 
     init(serverURL: URL = URL(string: "ws://192.168.1.23:9876")!) {
@@ -22,8 +21,7 @@ final class WebSocketClient {
         while !Task.isCancelled {
             let session = URLSession(configuration: .default)
             let task = session.webSocketTask(with: serverURL)
-            task.maximumMessageSize = 16 * 1024 * 1024 // 16 MB — diffs can be large
-            await MainActor.run { self.webSocketTask = task }
+            task.maximumMessageSize = 16 * 1024 * 1024
             task.resume()
             await MainActor.run {
                 self.isConnected = true

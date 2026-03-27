@@ -23,6 +23,9 @@ struct DiffView: View {
 private struct DiffTextView: UIViewRepresentable {
     let lines: [String]
 
+    final class Coordinator { var generation = 0 }
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
     func makeUIView(context: Context) -> UITextView {
         let tv = UITextView()
         tv.isEditable = false
@@ -34,28 +37,32 @@ private struct DiffTextView: UIViewRepresentable {
     }
 
     func updateUIView(_ tv: UITextView, context: Context) {
-        let snapshot = lines
-        if snapshot.isEmpty { return }
+        if lines.isEmpty { return }
 
-        // Build attributed string off main thread, apply on main
+        let coord = context.coordinator
+        coord.generation += 1
+        let gen = coord.generation
+        let lines = self.lines
+
         DispatchQueue.global(qos: .userInitiated).async {
             let result = NSMutableAttributedString()
             let mono = UIFont.monospacedSystemFont(ofSize: 13, weight: .regular)
             let nl = NSAttributedString(string: "\n")
 
-            for (i, line) in snapshot.enumerated() {
+            for (i, line) in lines.enumerated() {
                 let color = uiColorForLine(line)
                 let str = NSAttributedString(
                     string: "\u{2502} \(line)",
                     attributes: [.foregroundColor: color, .font: mono]
                 )
                 result.append(str)
-                if i < snapshot.count - 1 {
+                if i < lines.count - 1 {
                     result.append(nl)
                 }
             }
 
             DispatchQueue.main.async {
+                guard coord.generation == gen else { return }
                 let offset = tv.contentOffset
                 tv.attributedText = result
                 tv.contentOffset = offset
