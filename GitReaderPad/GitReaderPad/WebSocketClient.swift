@@ -4,7 +4,7 @@ import Observation
 @Observable
 @MainActor
 final class WebSocketClient {
-    var diffText: String = ""
+    var lines: [String] = []
     var isConnected: Bool = false
 
     private var webSocketTask: URLSessionWebSocketTask?
@@ -35,9 +35,10 @@ final class WebSocketClient {
                 while true {
                     let message = try await task.receive()
                     if case .string(let text) = message {
+                        let parsed = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
                         await MainActor.run {
-                            self.diffText = text
-                            log("diff received (\(text.count) chars, \(text.filter { $0 == "\n" }.count) lines)")
+                            self.lines = parsed
+                            log("diff received (\(text.count) chars, \(parsed.count) lines)")
                         }
                     }
                 }

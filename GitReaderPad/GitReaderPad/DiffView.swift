@@ -1,52 +1,74 @@
 import SwiftUI
+import UIKit
 
 struct DiffView: View {
     @State private var client = WebSocketClient()
 
     var body: some View {
-        ScrollView([.horizontal, .vertical]) {
-            Text(attributedDiff)
-                .font(.system(size: 13, design: .monospaced))
-                .textSelection(.enabled)
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .topLeading)
+        DiffTextView(lines: client.lines)
+            .ignoresSafeArea()
+            .overlay(alignment: .topTrailing) {
+                Circle()
+                    .fill(client.isConnected ? .green : .red)
+                    .frame(width: 10, height: 10)
+                    .padding(16)
+            }
+            .preferredColorScheme(.dark)
+            .task { client.start() }
+    }
+}
+
+// MARK: - UIKit text view (handles 200k+ lines without issue)
+
+private struct DiffTextView: UIViewRepresentable {
+    let lines: [String]
+
+    func makeUIView(context: Context) -> UITextView {
+        let tv = UITextView()
+        tv.isEditable = false
+        tv.backgroundColor = .black
+        tv.indicatorStyle = .white
+        tv.textContainerInset = UIEdgeInsets(top: 12, left: 8, bottom: 12, right: 8)
+        tv.font = UIFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        return tv
+    }
+
+    func updateUIView(_ tv: UITextView, context: Context) {
+        let snapshot = lines
+        if snapshot.isEmpty { return }
+
+        // Build attributed string off main thread, apply on main
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = NSMutableAttributedString()
+            let mono = UIFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+            let nl = NSAttributedString(string: "\n")
+
+            for (i, line) in snapshot.enumerated() {
+                let color = uiColorForLine(line)
+                let str = NSAttributedString(
+                    string: "\u{2502} \(line)",
+                    attributes: [.foregroundColor: color, .font: mono]
+                )
+                result.append(str)
+                if i < snapshot.count - 1 {
+                    result.append(nl)
+                }
+            }
+
+            DispatchQueue.main.async {
+                let offset = tv.contentOffset
+                tv.attributedText = result
+                tv.contentOffset = offset
+            }
         }
-        .defaultScrollAnchor(.topLeading)
-        .background(.black)
-        .overlay(alignment: .topTrailing) {
-            Circle()
-                .fill(client.isConnected ? .green : .red)
-                .frame(width: 10, height: 10)
-                .padding(16)
-        }
-        .ignoresSafeArea()
-        .preferredColorScheme(.dark)
-        .task { client.start() }
     }
 
     // 1:1 match with SpiralLayout.ts colorForLine()
-    private var attributedDiff: AttributedString {
-        var result = AttributedString()
-        let rawLines = client.diffText.split(
-            separator: "\n", omittingEmptySubsequences: false
-        )
-        for (i, line) in rawLines.enumerated() {
-            let s = String(line)
-            var part = AttributedString("\u{2502} \(s)")
-            part.foregroundColor = colorForLine(s)
-            result.append(part)
-            if i < rawLines.count - 1 {
-                result.append(AttributedString("\n"))
-            }
-        }
-        return result
-    }
-
-    private func colorForLine(_ line: String) -> Color {
-        if line.hasPrefix("#")  { return Color(red: 0.7, green: 0.4, blue: 0.9) } // purple - metadata
-        if line.hasPrefix("@@") { return Color(red: 0.3, green: 0.8, blue: 0.9) } // cyan   - hunk header
-        if line.hasPrefix("+")  { return Color(red: 0.3, green: 0.9, blue: 0.3) } // green  - addition
-        if line.hasPrefix("-")  { return Color(red: 0.9, green: 0.3, blue: 0.3) } // red    - deletion
-        return Color(red: 0.85, green: 0.85, blue: 0.85)                           // gray   - context
+    private func uiColorForLine(_ line: String) -> UIColor {
+        if line.hasPrefix("#")  { return UIColor(red: 0.7, green: 0.4, blue: 0.9, alpha: 1) } // purple
+        if line.hasPrefix("@@") { return UIColor(red: 0.3, green: 0.8, blue: 0.9, alpha: 1) } // cyan
+        if line.hasPrefix("+")  { return UIColor(red: 0.3, green: 0.9, blue: 0.3, alpha: 1) } // green
+        if line.hasPrefix("-")  { return UIColor(red: 0.9, green: 0.3, blue: 0.3, alpha: 1) } // red
+        return UIColor(red: 0.85, green: 0.85, blue: 0.85, alpha: 1)                           // gray
     }
 }
