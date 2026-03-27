@@ -18,7 +18,7 @@ struct DiffView: View {
     }
 }
 
-// MARK: - UIKit text view (handles 200k+ lines without issue)
+// MARK: - UIKit text view (TextKit renders only visible glyphs)
 
 private struct DiffTextView: UIViewRepresentable {
     let lines: [String]
