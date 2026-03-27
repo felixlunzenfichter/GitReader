@@ -1,0 +1,53 @@
+import Foundation
+import Observation
+
+@Observable
+@MainActor
+final class WebSocketClient {
+    var lines: [String] = []
+    var isConnected: Bool = false
+
+    private let serverURL: URL
+
+    init(serverURL: URL = URL(string: "ws://192.168.1.23:9876")!) {
+        self.serverURL = serverURL
+    }
+
+    func start() {
+        Task { await connectLoop() }
+    }
+
+    private nonisolated func connectLoop() async {
+        while !Task.isCancelled {
+            let session = URLSession(configuration: .default)
+            let task = session.webSocketTask(with: serverURL)
+            task.maximumMessageSize = 16 * 1024 * 1024
+            task.resume()
+            await MainActor.run {
+                self.isConnected = true
+                log("connected to \(self.serverURL)")
+            }
+
+            do {
+                try await task.send(.string("ready"))
+                while true {
+                    let message = try await task.receive()
+                    if case .string(let text) = message {
+                        let parsed = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+                        await MainActor.run {
+                            self.lines = parsed
+                            log("diff received (\(text.count) chars, \(parsed.count) lines)")
+                        }
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    logError("connection lost: \(error)")
+                    self.isConnected = false
+                }
+            }
+
+            try? await Task.sleep(for: .seconds(2))
+        }
+    }
+}

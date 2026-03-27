@@ -21,3 +21,12 @@ node_modules/
 *.lock
 PluginsUserPreferences/
 Workspaces/
+
+# Xcode / GitReaderPad
+GitReaderPad/GitReaderPad.xcodeproj/project.xcworkspace/
+GitReaderPad/GitReaderPad.xcodeproj/xcuserdata/
+DerivedData/
+build/
+*.xcuserstate
+*.xcscmblueprint
+*.ipa
