@@ -50,7 +50,7 @@ private struct DiffTextView: UIViewRepresentable {
             let nl = NSAttributedString(string: "\n")
 
             for (i, line) in lines.enumerated() {
-                let color = uiColorForLine(line)
+                let color = uiColorForLine(line, index: i, lines: lines)
                 let str = NSAttributedString(
                     string: "\u{2502} \(line)",
                     attributes: [.foregroundColor: color, .font: mono]
@@ -71,12 +71,16 @@ private struct DiffTextView: UIViewRepresentable {
     }
 
     // 1:1 match with SpiralLayout.ts colorForLine()
-    private func uiColorForLine(_ line: String) -> UIColor {
-        // Explicit activity colors requested by product:
-        // inactive = orange, active = yellow
-        if line.hasPrefix("# ACTIVE:") {
-            let lower = line.lowercased()
-            if lower.contains("yes") {
+    private func uiColorForLine(_ line: String, index: Int, lines: [String]) -> UIColor {
+        // Color entire agent section (agent/active/branch/task)
+        if line.hasPrefix("# ACTIVE AGENT:") || line.hasPrefix("# ACTIVE:") || line.hasPrefix("# AGENT BRANCH:") || line.hasPrefix("# AGENT TASK:") {
+            let sectionWindow = [
+                line,
+                index > 0 ? lines[index - 1] : "",
+                index + 1 < lines.count ? lines[index + 1] : ""
+            ].joined(separator: " ").lowercased()
+
+            if sectionWindow.contains("# active: yes") {
                 return UIColor(red: 0.90, green: 0.78, blue: 0.00, alpha: 1) // darker yellow
             }
             return UIColor(red: 1.00, green: 0.55, blue: 0.00, alpha: 1)     // orange

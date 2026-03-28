@@ -137,6 +137,7 @@ function getGitDiff(repoPath, repoLabel) {
     const active = Boolean(activeContext);
     const agent = activeContext?.agent || "-";
     const activeBranch = activeContext?.branch || branch;
+    const agentTask = activeContext?.task ? truncateMiddle(activeContext.task, 120) : "-";
 
     const header = [
       `# Repository: ${repoName}`,
@@ -144,6 +145,7 @@ function getGitDiff(repoPath, repoLabel) {
       `# ACTIVE AGENT: ${agent}`,
       `# ACTIVE: ${active ? "yes" : "no"}`,
       `# AGENT BRANCH: ${activeBranch}`,
+      `# AGENT TASK: ${agentTask}`,
       `# vs: ${compareBase}`,
       `#`,
       `# LOCAL BRANCHES:`,
