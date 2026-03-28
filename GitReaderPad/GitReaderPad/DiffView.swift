@@ -72,6 +72,16 @@ private struct DiffTextView: UIViewRepresentable {
 
     // 1:1 match with SpiralLayout.ts colorForLine()
     private func uiColorForLine(_ line: String) -> UIColor {
+        // Explicit activity colors requested by product:
+        // inactive = orange, active = yellow
+        if line.hasPrefix("# ACTIVE:") {
+            let lower = line.lowercased()
+            if lower.contains("yes") {
+                return UIColor(red: 0.90, green: 0.78, blue: 0.00, alpha: 1) // darker yellow
+            }
+            return UIColor(red: 1.00, green: 0.55, blue: 0.00, alpha: 1)     // orange
+        }
+
         if line.hasPrefix("#")  { return UIColor(red: 0.7, green: 0.4, blue: 0.9, alpha: 1) } // purple
         if line.hasPrefix("@@") { return UIColor(red: 0.3, green: 0.8, blue: 0.9, alpha: 1) } // cyan
         if line.hasPrefix("+")  { return UIColor(red: 0.3, green: 0.9, blue: 0.3, alpha: 1) } // green

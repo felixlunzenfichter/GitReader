@@ -21,10 +21,93 @@ function gitExec(cmd, repoPath) {
   return execSync(cmd, { cwd: repoPath, maxBuffer: 1024 * 1024, timeout: 5000 }).toString().trim();
 }
 
+function gitExecSafe(cmd, repoPath, fallback = "-") {
+  try {
+    const out = gitExec(cmd, repoPath);
+    return out || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function loadActiveContexts() {
+  // Priority 1: runtime env injection
+  const rawEnv = process.env.GITREADER_ACTIVE_CONTEXTS_JSON;
+  if (rawEnv) {
+    try {
+      const parsed = JSON.parse(rawEnv);
+      if (Array.isArray(parsed)) return parsed;
+    } catch {}
+  }
+
+  // Priority 2: local sidecar file maintained by tracked-agent launcher
+  const sidecarPath = path.resolve(__dirname, "active-contexts.json");
+  try {
+    if (fs.existsSync(sidecarPath)) {
+      const rawFile = fs.readFileSync(sidecarPath, "utf8");
+      const parsed = JSON.parse(rawFile);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {}
+
+  return [];
+}
+
+function findActiveContextForRepo(repoPath, branch, activeContexts) {
+  return activeContexts.find((ctx) => {
+    const cwd = String(ctx.cwd || "");
+    const ctxBranch = String(ctx.branch || "");
+    const status = String(ctx.status || "").toLowerCase();
+    const matchesRepo = cwd === repoPath || (cwd && cwd.startsWith(repoPath + path.sep));
+    const matchesBranch = !ctxBranch || ctxBranch === branch;
+    const isActiveStatus = !status || ["running", "working", "busy", "idle", "waiting", "error", "blocked"].includes(status);
+    return matchesRepo && matchesBranch && isActiveStatus;
+  });
+}
+
+function truncateMiddle(value, max = 42) {
+  const s = String(value || "-");
+  if (s.length <= max) return s;
+  const left = Math.ceil((max - 1) / 2);
+  const right = Math.floor((max - 1) / 2);
+  return `${s.slice(0, left)}…${s.slice(s.length - right)}`;
+}
+
+function normalizeStatus(status, isActive) {
+  const s = String(status || "").toLowerCase();
+  if (["error", "failed", "blocked"].includes(s)) return "error";
+  if (["waiting", "input", "paused"].includes(s)) return "waiting";
+  if (["idle", "sleeping"].includes(s)) return "idle";
+  if (["running", "working", "busy"].includes(s)) return "running";
+  return isActive ? "running" : "unknown";
+}
+
+function statusPresentation(status) {
+  switch (status) {
+    case "running":
+      return { icon: "●", color: "orange" };
+    case "idle":
+      return { icon: "○", color: "blue-muted" };
+    case "waiting":
+      return { icon: "◐", color: "yellow" };
+    case "error":
+      return { icon: "✖", color: "red" };
+    default:
+      return { icon: "?", color: "gray" };
+  }
+}
+
 function getGitDiff(repoPath, repoLabel) {
   try {
     const branch = gitExec("git rev-parse --abbrev-ref HEAD", repoPath);
     const repoName = repoLabel || path.basename(repoPath);
+    const activeContexts = loadActiveContexts();
+    const activeContext = findActiveContextForRepo(repoPath, branch, activeContexts);
+
+    const dirty = gitExecSafe("git status --porcelain", repoPath, "") ? "yes" : "no";
+    const lastCommit = gitExecSafe("git log -1 --pretty=format:'%h %s'", repoPath);
+    const upstream = gitExecSafe("git rev-parse --abbrev-ref --symbolic-full-name @{u}", repoPath);
+    const compareBase = gitExecSafe("git show-ref --verify --quiet refs/heads/main && echo main || echo master", repoPath, "main");
 
     const localBranches = gitExec("git branch --format='%(refname:short)'", repoPath)
       .split("\n")
@@ -51,10 +134,17 @@ function getGitDiff(repoPath, repoLabel) {
       prLines = [`# OPEN PRs: (gh unavailable)`];
     }
 
+    const active = Boolean(activeContext);
+    const agent = activeContext?.agent || "-";
+    const activeBranch = activeContext?.branch || branch;
+
     const header = [
       `# Repository: ${repoName}`,
       `# BRANCH: ${branch}`,
-      `# vs: main`,
+      `# ACTIVE AGENT: ${agent}`,
+      `# ACTIVE: ${active ? "yes" : "no"}`,
+      `# AGENT BRANCH: ${activeBranch}`,
+      `# vs: ${compareBase}`,
       `#`,
       `# LOCAL BRANCHES:`,
       ...localBranches.map((b) => `#   ${b}`),
@@ -66,7 +156,7 @@ function getGitDiff(repoPath, repoLabel) {
       `#`,
     ].join("\n");
 
-    const committed = gitExec("git diff main...HEAD", repoPath);
+    const committed = gitExec(`git diff ${compareBase}...HEAD`, repoPath);
     const staged = gitExec("git diff --cached", repoPath);
     const unstaged = gitExec("git diff", repoPath);
     const untracked = gitExec("git status --porcelain --untracked-files=all", repoPath)
@@ -114,7 +204,7 @@ function getGitDiff(repoPath, repoLabel) {
 
     const sections = [
       header,
-      `# Committed (branch vs main)`,
+      `# Committed (branch vs ${compareBase})`,
       committed || `[No changes]`,
       `# Staged`,
       staged || `[Nothing staged]`,
