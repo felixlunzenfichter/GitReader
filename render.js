@@ -30,52 +30,6 @@ function gitExecSafe(cmd, repoPath, fallback = "-") {
   }
 }
 
-function loadActiveContexts() {
-  // Priority 1: runtime env injection
-  const rawEnv = process.env.GITREADER_ACTIVE_CONTEXTS_JSON;
-  if (rawEnv) {
-    try {
-      const parsed = JSON.parse(rawEnv);
-      if (Array.isArray(parsed)) return parsed;
-    } catch {}
-  }
-
-  // Priority 2: local sidecar file maintained by tracked-agent launcher
-  const sidecarPath = path.resolve(__dirname, "active-contexts.json");
-  try {
-    if (fs.existsSync(sidecarPath)) {
-      const rawFile = fs.readFileSync(sidecarPath, "utf8");
-      const parsed = JSON.parse(rawFile);
-      if (Array.isArray(parsed)) return parsed;
-    }
-  } catch {}
-
-  return [];
-}
-
-function findContextForRepo(repoPath, branch, activeContexts) {
-  const matches = activeContexts.filter((ctx) => {
-    const cwd = String(ctx.cwd || "");
-    const ctxBranch = String(ctx.branch || "");
-    const matchesRepo = cwd === repoPath || (cwd && cwd.startsWith(repoPath + path.sep));
-    const matchesBranch = !ctxBranch || ctxBranch === branch;
-    return matchesRepo && matchesBranch;
-  });
-
-  if (matches.length === 0) return undefined;
-
-  matches.sort((a, b) => {
-    const aActive = ["running", "working", "busy"].includes(String(a.status || "").toLowerCase()) ? 1 : 0;
-    const bActive = ["running", "working", "busy"].includes(String(b.status || "").toLowerCase()) ? 1 : 0;
-    if (aActive !== bActive) return bActive - aActive;
-    const at = Number(a.updatedAt || 0);
-    const bt = Number(b.updatedAt || 0);
-    return bt - at;
-  });
-
-  return matches[0];
-}
-
 function truncateMiddle(value, max = 42) {
   const s = String(value || "-");
   if (s.length <= max) return s;
@@ -88,9 +42,6 @@ function getGitDiff(repoPath, repoLabel) {
   try {
     const branch = gitExec("git rev-parse --abbrev-ref HEAD", repoPath);
     const repoName = repoLabel || path.basename(repoPath);
-    const activeContexts = loadActiveContexts();
-    const activeContext = findContextForRepo(repoPath, branch, activeContexts);
-
     const compareBase = gitExecSafe("git show-ref --verify --quiet refs/heads/main && echo main || echo master", repoPath, "main");
 
     const localBranches = gitExec("git branch --format='%(refname:short)'", repoPath)
@@ -232,7 +183,8 @@ function renderHistoryBlock() {
   const lines = history.map((h, i) => {
     const when = new Date(Number(h.ts || 0)).toISOString();
     const task = truncateMiddle(h.task || "-", 120);
-    return `# ${i + 1}. [${h.event}] [${h.status}] [${h.agent}] [${h.session}] [${h.branch}] ${when} :: ${task}`;
+    const model = h.model || "-";
+    return `# ${i + 1}. [${h.event}] [${h.status}] [${h.agent}] [${model}] [${h.session}] [${h.branch}] ${when} :: ${task}`;
   });
 
   return [...header, ...(lines.length ? lines : ["# [no history yet]"]), "#"].join("\n");

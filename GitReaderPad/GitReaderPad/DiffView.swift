@@ -50,7 +50,7 @@ private struct DiffTextView: UIViewRepresentable {
             let nl = NSAttributedString(string: "\n")
 
             for (i, line) in lines.enumerated() {
-                let color = uiColorForLine(line, index: i, lines: lines)
+                let color = uiColorForLine(line)
                 let str = NSAttributedString(
                     string: "\u{2502} \(line)",
                     attributes: [.foregroundColor: color, .font: mono]
@@ -71,7 +71,7 @@ private struct DiffTextView: UIViewRepresentable {
     }
 
     // 1:1 match with SpiralLayout.ts colorForLine()
-    private func uiColorForLine(_ line: String, index: Int, lines: [String]) -> UIColor {
+    private func uiColorForLine(_ line: String) -> UIColor {
         // Timeline row coloring by task status
         if line.hasPrefix("# "), line.contains("[task_") {
             let lower = line.lowercased()

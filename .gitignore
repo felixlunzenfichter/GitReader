@@ -30,3 +30,7 @@ build/
 *.xcuserstate
 *.xcscmblueprint
 *.ipa
+
+# Runtime state (written by run-tracked-agent.sh)
+active-contexts.json
+task-history.jsonl
