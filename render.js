@@ -49,11 +49,15 @@ function truncateMiddle(value, max = 42) {
   return `${s.slice(0, left)}…${s.slice(s.length - right)}`;
 }
 
+function detectCompareBase(repoPath) {
+  return gitExecSafe("git show-ref --verify --quiet refs/heads/main && echo main || echo master", repoPath, "main");
+}
+
 function getGitDiff(repoPath, repoLabel) {
   try {
     const branch = gitExec("git rev-parse --abbrev-ref HEAD", repoPath);
     const repoName = repoLabel || path.basename(repoPath);
-    const compareBase = gitExecSafe("git show-ref --verify --quiet refs/heads/main && echo main || echo master", repoPath, "main");
+    const compareBase = detectCompareBase(repoPath);
 
     const localBranches = gitExec("git branch --format='%(refname:short)'", repoPath)
       .split("\n")
@@ -159,6 +163,30 @@ function loadTaskHistory(limit = 20) {
   }
 }
 
+function renderTaskFinishedExtra(entry) {
+  const extra = [];
+  if (!("changedFiles" in entry)) {
+    extra.push("#    changes: [not tracked]");
+  } else {
+    const files = Array.isArray(entry.changedFiles) ? entry.changedFiles : [];
+    if (files.length > 0) {
+      extra.push(`#    changes: ${files.slice(0, 8).join(', ')}${files.length > 8 ? ` (+${files.length - 8} more)` : ''}`);
+    } else {
+      extra.push("#    changes: [none]");
+    }
+  }
+  if (entry.diffPreview) {
+    const MAX_RENDER = 20;
+    const diffLines = entry.diffPreview.split("\n");
+    const shown = diffLines.slice(0, MAX_RENDER);
+    shown.forEach(line => extra.push(`#    ${line}`));
+    if (diffLines.length > MAX_RENDER) {
+      extra.push(`#    [... ${diffLines.length - MAX_RENDER} more diff lines]`);
+    }
+  }
+  return extra;
+}
+
 function renderHistoryBlock() {
   const history = loadTaskHistory(30);
   const header = [
@@ -172,32 +200,7 @@ function renderHistoryBlock() {
     const task = truncateMiddle(h.task || "-", 120);
     const model = h.model || "-";
     const main = `# ${i + 1}. [${h.event}] [${h.status}] [${h.agent}] [${model}] [${h.session}] [${h.branch}] ${when} :: ${task}`;
-
-    const extra = [];
-    if (h.event === "task_finished") {
-      if (!("changedFiles" in h)) {
-        extra.push("#    changes: [not tracked]");
-      } else {
-        const files = Array.isArray(h.changedFiles) ? h.changedFiles : [];
-        if (files.length > 0) {
-          extra.push(`#    changes: ${files.slice(0, 8).join(', ')}${files.length > 8 ? ` (+${files.length - 8} more)` : ''}`);
-        } else {
-          extra.push("#    changes: [none]");
-        }
-      }
-      if (h.diffPreview) {
-        const diffLines = h.diffPreview.split("\n");
-        const MAX_RENDER = 20;
-        const shown = diffLines.slice(0, MAX_RENDER);
-        shown.forEach(line => {
-          extra.push(`#    ${line}`);
-        });
-        if (diffLines.length > MAX_RENDER) {
-          extra.push(`#    [... ${diffLines.length - MAX_RENDER} more diff lines]`);
-        }
-      }
-    }
-
+    const extra = h.event === "task_finished" ? renderTaskFinishedExtra(h) : [];
     return [main, ...extra];
   });
 

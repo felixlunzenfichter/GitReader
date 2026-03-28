@@ -1,4 +1,6 @@
-const { WebSocketServer } = require("ws");
+const { WebSocketServer, WebSocket } = require("ws");
+const { exec } = require("child_process");
+const os = require("os");
 const path = require("path");
 const fs = require("fs");
 const { announceTaskEvent, speakWithOpenAI } = require("./tts.js");
@@ -9,16 +11,19 @@ const RENDER_PATH = path.resolve(__dirname, "render.js");
 const HISTORY_PATH = path.resolve(__dirname, "task-history.jsonl");
 const SECRETS_PATH = path.resolve(__dirname, ".secrets/openai.env");
 
-// --- Load OpenAI API key from .secrets/openai.env ---
-if (fs.existsSync(SECRETS_PATH)) {
-  for (const line of fs.readFileSync(SECRETS_PATH, "utf8").split("\n")) {
+function loadSecretsFromEnv(filePath) {
+  if (!fs.existsSync(filePath)) {
+    console.warn("[TTS] No .secrets/openai.env — TTS disabled");
+    return;
+  }
+  for (const line of fs.readFileSync(filePath, "utf8").split("\n")) {
     const m = line.match(/^(\w+)=["']?(.+?)["']?\s*$/);
     if (m) process.env[m[1]] = m[2];
   }
   console.log("[TTS] Loaded API key from .secrets/openai.env");
-} else {
-  console.warn("[TTS] No .secrets/openai.env — TTS disabled");
 }
+
+loadSecretsFromEnv(SECRETS_PATH);
 
 // Hot-reload render module on each call (edits take effect within 2s, no restart)
 function render() {
@@ -67,7 +72,7 @@ setInterval(() => {
   lastDiff = diff;
   console.log(`Diff changed: ${diff.split("\n").length} lines — pushing to ${wss.clients.size} client(s)`);
   for (const ws of wss.clients) {
-    if (ws.readyState === 1) ws.send(diff);
+    if (ws.readyState === WebSocket.OPEN) ws.send(diff);
   }
 }, POLL_INTERVAL);
 
@@ -81,46 +86,53 @@ try {
   console.log("[TTS] No task-history.jsonl yet — will watch for creation");
 }
 
+function playAudioLocally(audioBuffer) {
+  const tmpFile = path.join(os.tmpdir(), `tts-${Date.now()}.mp3`);
+  fs.writeFileSync(tmpFile, audioBuffer);
+  exec(`afplay "${tmpFile}" && rm "${tmpFile}"`, (err) => {
+    if (err) console.error(`[TTS] Local playback error: ${err.message}`);
+  });
+}
+
+function broadcastAudio(audioBuffer) {
+  for (const ws of wss.clients) {
+    if (ws.readyState === WebSocket.OPEN) ws.send(audioBuffer);
+  }
+}
+
+async function processNewHistoryEntries() {
+  if (!fs.existsSync(HISTORY_PATH)) return;
+  const content = fs.readFileSync(HISTORY_PATH, "utf8");
+  const lines = content.split("\n").filter(Boolean);
+  if (lines.length <= lastHistoryLineCount) return;
+
+  const newLines = lines.slice(lastHistoryLineCount);
+  lastHistoryLineCount = lines.length;
+
+  for (const line of newLines) {
+    let entry;
+    try { entry = JSON.parse(line); } catch { continue; }
+
+    console.log(`[TTS] Started TTS — event: ${entry.event}, task: "${entry.task}"`);
+    try {
+      const audio = await announceTaskEvent(entry, speakWithOpenAI);
+      if (!audio) {
+        console.log(`[TTS] Finished TTS — skipped (unknown event: ${entry.event})`);
+        continue;
+      }
+
+      playAudioLocally(audio);
+      broadcastAudio(audio);
+      console.log(`[TTS] Finished TTS — success: ${audio.length} bytes, sent to ${wss.clients.size} client(s), playing locally`);
+    } catch (err) {
+      console.error(`[TTS] Finished TTS — error: ${err.message}`);
+    }
+  }
+}
+
 setInterval(async () => {
   try {
-    if (!fs.existsSync(HISTORY_PATH)) return;
-    const content = fs.readFileSync(HISTORY_PATH, "utf8");
-    const lines = content.split("\n").filter(Boolean);
-    if (lines.length <= lastHistoryLineCount) return;
-
-    const newLines = lines.slice(lastHistoryLineCount);
-    lastHistoryLineCount = lines.length;
-
-    for (const line of newLines) {
-      let entry;
-      try { entry = JSON.parse(line); } catch { continue; }
-
-      console.log(`[TTS] Started TTS — event: ${entry.event}, task: "${entry.task}"`);
-      try {
-        const audio = await announceTaskEvent(entry, speakWithOpenAI);
-        if (!audio) {
-          console.log(`[TTS] Finished TTS — skipped (unknown event: ${entry.event})`);
-          continue;
-        }
-
-        // Play locally on Mac
-        const tmpFile = path.join(require("os").tmpdir(), `tts-${Date.now()}.mp3`);
-        fs.writeFileSync(tmpFile, audio);
-        require("child_process").exec(`afplay "${tmpFile}" && rm "${tmpFile}"`, (err) => {
-          if (err) console.error(`[TTS] Local playback error: ${err.message}`);
-        });
-
-        // Also send to connected iPad clients
-        if (wss.clients.size > 0) {
-          for (const ws of wss.clients) {
-            if (ws.readyState === 1) ws.send(audio);
-          }
-        }
-        console.log(`[TTS] Finished TTS — success: ${audio.length} bytes, sent to ${wss.clients.size} client(s), playing locally`);
-      } catch (err) {
-        console.error(`[TTS] Finished TTS — error: ${err.message}`);
-      }
-    }
+    await processNewHistoryEntries();
   } catch (err) {
     console.error(`[TTS] Watcher error: ${err.message}`);
   }
