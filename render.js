@@ -73,30 +73,6 @@ function truncateMiddle(value, max = 42) {
   return `${s.slice(0, left)}…${s.slice(s.length - right)}`;
 }
 
-function normalizeStatus(status, isActive) {
-  const s = String(status || "").toLowerCase();
-  if (["error", "failed", "blocked"].includes(s)) return "error";
-  if (["waiting", "input", "paused"].includes(s)) return "waiting";
-  if (["idle", "sleeping"].includes(s)) return "idle";
-  if (["running", "working", "busy"].includes(s)) return "running";
-  return isActive ? "running" : "unknown";
-}
-
-function statusPresentation(status) {
-  switch (status) {
-    case "running":
-      return { icon: "●", color: "orange" };
-    case "idle":
-      return { icon: "○", color: "blue-muted" };
-    case "waiting":
-      return { icon: "◐", color: "yellow" };
-    case "error":
-      return { icon: "✖", color: "red" };
-    default:
-      return { icon: "?", color: "gray" };
-  }
-}
-
 function getGitDiff(repoPath, repoLabel) {
   try {
     const branch = gitExec("git rev-parse --abbrev-ref HEAD", repoPath);
@@ -104,9 +80,6 @@ function getGitDiff(repoPath, repoLabel) {
     const activeContexts = loadActiveContexts();
     const activeContext = findActiveContextForRepo(repoPath, branch, activeContexts);
 
-    const dirty = gitExecSafe("git status --porcelain", repoPath, "") ? "yes" : "no";
-    const lastCommit = gitExecSafe("git log -1 --pretty=format:'%h %s'", repoPath);
-    const upstream = gitExecSafe("git rev-parse --abbrev-ref --symbolic-full-name @{u}", repoPath);
     const compareBase = gitExecSafe("git show-ref --verify --quiet refs/heads/main && echo main || echo master", repoPath, "main");
 
     const localBranches = gitExec("git branch --format='%(refname:short)'", repoPath)
