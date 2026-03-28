@@ -5,13 +5,17 @@ const MESSAGES = {
 
 async function announceTaskEvent({ event, task }, speak) {
   const fmt = MESSAGES[event];
-  if (!fmt) return;
-  await speak(fmt(task));
+  if (!fmt) return null;
+  return await speak(fmt(task));
 }
 
 async function speakWithOpenAI(text) {
+  console.log(`[TTS] request: "${text}"`);
   const key = process.env.OPENAI_API_KEY;
-  if (!key) throw new Error("OPENAI_API_KEY not set");
+  if (!key) {
+    console.error("[TTS] FAIL: OPENAI_API_KEY not set");
+    throw new Error("OPENAI_API_KEY not set");
+  }
 
   const res = await fetch("https://api.openai.com/v1/audio/speech", {
     method: "POST",
@@ -23,9 +27,14 @@ async function speakWithOpenAI(text) {
   });
 
   if (!res.ok) {
-    throw new Error(`OpenAI TTS failed: ${res.status} ${await res.text()}`);
+    const body = await res.text();
+    console.error(`[TTS] FAIL: HTTP ${res.status} — ${body}`);
+    throw new Error(`OpenAI TTS failed: ${res.status} ${body}`);
   }
-  return Buffer.from(await res.arrayBuffer());
+
+  const buf = Buffer.from(await res.arrayBuffer());
+  console.log(`[TTS] OK: ${buf.length} bytes for "${text}"`);
+  return buf;
 }
 
 module.exports = { announceTaskEvent, speakWithOpenAI };
