@@ -38,3 +38,8 @@ task-history.jsonl
 # Local secrets
 .secrets/
 *.env.local
+
+# Local runtime/secret state
+.secrets/
+active-contexts.json
+task-history.jsonl
