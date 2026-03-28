@@ -180,11 +180,27 @@ function renderHistoryBlock() {
     "#",
   ];
 
-  const lines = history.map((h, i) => {
+  const lines = history.flatMap((h, i) => {
     const when = new Date(Number(h.ts || 0)).toISOString();
     const task = truncateMiddle(h.task || "-", 120);
     const model = h.model || "-";
-    return `# ${i + 1}. [${h.event}] [${h.status}] [${h.agent}] [${model}] [${h.session}] [${h.branch}] ${when} :: ${task}`;
+    const main = `# ${i + 1}. [${h.event}] [${h.status}] [${h.agent}] [${model}] [${h.session}] [${h.branch}] ${when} :: ${task}`;
+
+    const extra = [];
+    if (h.event === "task_finished") {
+      if (!("changedFiles" in h)) {
+        extra.push("#    changes: [not tracked]");
+      } else {
+        const files = Array.isArray(h.changedFiles) ? h.changedFiles : [];
+        if (files.length > 0) {
+          extra.push(`#    changes: ${files.slice(0, 8).join(', ')}${files.length > 8 ? ` (+${files.length - 8} more)` : ''}`);
+        } else {
+          extra.push("#    changes: [none]");
+        }
+      }
+    }
+
+    return [main, ...extra];
   });
 
   return [...header, ...(lines.length ? lines : ["# [no history yet]"]), "#"].join("\n");
