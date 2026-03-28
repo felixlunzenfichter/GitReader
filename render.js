@@ -198,6 +198,17 @@ function renderHistoryBlock() {
           extra.push("#    changes: [none]");
         }
       }
+      if (h.diffPreview) {
+        const diffLines = h.diffPreview.split("\n");
+        const MAX_RENDER = 20;
+        const shown = diffLines.slice(0, MAX_RENDER);
+        shown.forEach(line => {
+          extra.push(`#    ${line}`);
+        });
+        if (diffLines.length > MAX_RENDER) {
+          extra.push(`#    [... ${diffLines.length - MAX_RENDER} more diff lines]`);
+        }
+      }
     }
 
     return [main, ...extra];
