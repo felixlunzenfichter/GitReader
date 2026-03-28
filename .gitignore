@@ -34,3 +34,7 @@ build/
 # Runtime state (written by run-tracked-agent.sh)
 active-contexts.json
 task-history.jsonl
+
+# Local secrets
+.secrets/
+*.env.local
