@@ -21,10 +21,39 @@ function gitExec(cmd, repoPath) {
   return execSync(cmd, { cwd: repoPath, maxBuffer: 1024 * 1024, timeout: 5000 }).toString().trim();
 }
 
+function gitExecSafe(cmd, repoPath, fallback = "-") {
+  try {
+    const out = gitExec(cmd, repoPath);
+    return out || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function readFileContent(absPath) {
+  try {
+    const stat = fs.statSync(absPath);
+    if (!stat.isFile()) return "[not a regular file]";
+    const raw = fs.readFileSync(absPath, "utf8");
+    return raw.length > 4000 ? raw.slice(0, 4000) + "\n...[truncated]" : raw;
+  } catch {
+    return "[read failed]";
+  }
+}
+
+function truncateMiddle(value, max = 42) {
+  const s = String(value || "-");
+  if (s.length <= max) return s;
+  const left = Math.ceil((max - 1) / 2);
+  const right = Math.floor((max - 1) / 2);
+  return `${s.slice(0, left)}…${s.slice(s.length - right)}`;
+}
+
 function getGitDiff(repoPath, repoLabel) {
   try {
     const branch = gitExec("git rev-parse --abbrev-ref HEAD", repoPath);
     const repoName = repoLabel || path.basename(repoPath);
+    const compareBase = gitExecSafe("git show-ref --verify --quiet refs/heads/main && echo main || echo master", repoPath, "main");
 
     const localBranches = gitExec("git branch --format='%(refname:short)'", repoPath)
       .split("\n")
@@ -54,7 +83,7 @@ function getGitDiff(repoPath, repoLabel) {
     const header = [
       `# Repository: ${repoName}`,
       `# BRANCH: ${branch}`,
-      `# vs: main`,
+      `# vs: ${compareBase}`,
       `#`,
       `# LOCAL BRANCHES:`,
       ...localBranches.map((b) => `#   ${b}`),
@@ -66,7 +95,7 @@ function getGitDiff(repoPath, repoLabel) {
       `#`,
     ].join("\n");
 
-    const committed = gitExec("git diff main...HEAD", repoPath);
+    const committed = gitExec(`git diff ${compareBase}...HEAD`, repoPath);
     const staged = gitExec("git diff --cached", repoPath);
     const unstaged = gitExec("git diff", repoPath);
     const untracked = gitExec("git status --porcelain --untracked-files=all", repoPath)
@@ -75,19 +104,7 @@ function getGitDiff(repoPath, repoLabel) {
       .map((l) => l.slice(3));
 
     const untrackedWithContent = untracked.map((relPath) => {
-      const absPath = path.join(repoPath, relPath);
-      let content = "[unreadable]";
-      try {
-        const stat = fs.statSync(absPath);
-        if (!stat.isFile()) {
-          content = "[not a regular file]";
-        } else {
-          const raw = fs.readFileSync(absPath, "utf8");
-          content = raw.length > 4000 ? raw.slice(0, 4000) + "\n...[truncated]" : raw;
-        }
-      } catch {
-        content = "[read failed]";
-      }
+      const content = readFileContent(path.join(repoPath, relPath));
       return `+  ${relPath}\n-----\n${content}\n-----`;
     });
 
@@ -96,25 +113,13 @@ function getGitDiff(repoPath, repoLabel) {
       .filter((f) => f);
 
     const unstagedFullContent = unstagedFiles.map((relPath) => {
-      const absPath = path.join(repoPath, relPath);
-      let content = "[unreadable]";
-      try {
-        const stat = fs.statSync(absPath);
-        if (!stat.isFile()) {
-          content = "[not a regular file]";
-        } else {
-          const raw = fs.readFileSync(absPath, "utf8");
-          content = raw.length > 4000 ? raw.slice(0, 4000) + "\n...[truncated]" : raw;
-        }
-      } catch {
-        content = "[read failed]";
-      }
+      const content = readFileContent(path.join(repoPath, relPath));
       return `~  ${relPath}\n-----\n${content}\n-----`;
     });
 
     const sections = [
       header,
-      `# Committed (branch vs main)`,
+      `# Committed (branch vs ${compareBase})`,
       committed || `[No changes]`,
       `# Staged`,
       staged || `[Nothing staged]`,
@@ -140,7 +145,67 @@ function getGitDiff(repoPath, repoLabel) {
   }
 }
 
+function loadTaskHistory(limit = 20) {
+  const p = path.resolve(__dirname, "task-history.jsonl");
+  try {
+    if (!fs.existsSync(p)) return [];
+    const lines = fs.readFileSync(p, "utf8").split("\n").filter(Boolean);
+    const parsed = lines.map((l) => {
+      try { return JSON.parse(l); } catch { return null; }
+    }).filter(Boolean);
+    return parsed.slice(-limit).reverse();
+  } catch {
+    return [];
+  }
+}
+
+function renderHistoryBlock() {
+  const history = loadTaskHistory(30);
+  const header = [
+    "# OpenClaw Task Timeline",
+    `# entries: ${history.length}`,
+    "#",
+  ];
+
+  const lines = history.flatMap((h, i) => {
+    const when = new Date(Number(h.ts || 0)).toISOString();
+    const task = truncateMiddle(h.task || "-", 120);
+    const model = h.model || "-";
+    const main = `# ${i + 1}. [${h.event}] [${h.status}] [${h.agent}] [${model}] [${h.session}] [${h.branch}] ${when} :: ${task}`;
+
+    const extra = [];
+    if (h.event === "task_finished") {
+      if (!("changedFiles" in h)) {
+        extra.push("#    changes: [not tracked]");
+      } else {
+        const files = Array.isArray(h.changedFiles) ? h.changedFiles : [];
+        if (files.length > 0) {
+          extra.push(`#    changes: ${files.slice(0, 8).join(', ')}${files.length > 8 ? ` (+${files.length - 8} more)` : ''}`);
+        } else {
+          extra.push("#    changes: [none]");
+        }
+      }
+      if (h.diffPreview) {
+        const diffLines = h.diffPreview.split("\n");
+        const MAX_RENDER = 20;
+        const shown = diffLines.slice(0, MAX_RENDER);
+        shown.forEach(line => {
+          extra.push(`#    ${line}`);
+        });
+        if (diffLines.length > MAX_RENDER) {
+          extra.push(`#    [... ${diffLines.length - MAX_RENDER} more diff lines]`);
+        }
+      }
+    }
+
+    return [main, ...extra];
+  });
+
+  return [...header, ...(lines.length ? lines : ["# [no history yet]"]), "#"].join("\n");
+}
+
 function renderAllRepositories() {
+  const historyBlock = renderHistoryBlock();
   const repositoriesList = [
     "# All Repositories",
     ...REPOSITORIES.map((repo, index) => `# ${index + 1}. ${repo.label}`),
@@ -148,7 +213,7 @@ function renderAllRepositories() {
   ].join("\n");
 
   const sections = REPOSITORIES.map((repo) => getGitDiff(repo.repoPath, repo.label));
-  return [repositoriesList, ...sections].join("\n\n");
+  return [historyBlock, repositoriesList, ...sections].join("\n\n");
 }
 
 module.exports = { REPOSITORIES, renderAllRepositories };
