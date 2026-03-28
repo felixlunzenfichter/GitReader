@@ -1,1 +1,71 @@
-[]
+[
+  {
+    "session": "persist-test",
+    "agent": "claude",
+    "model": "sonnet-4.5",
+    "status": "inactive",
+    "cwd": "/Users/felixlunzenfichter/Documents/GitReader",
+    "branch": "feat/tracked-agent-pr-demo",
+    "task": "Persist task after completion"
+  },
+  {
+    "session": "live-two-a",
+    "agent": "claude",
+    "model": "sonnet-4.5",
+    "status": "inactive",
+    "cwd": "/Users/felixlunzenfichter/Documents/GitReader",
+    "branch": "feat/tracked-agent-pr-demo",
+    "task": "Second concurrent task in GitReader",
+    "updatedAt": 1774691355916
+  },
+  {
+    "session": "live-two-b",
+    "agent": "claude",
+    "model": "sonnet-4.5",
+    "status": "inactive",
+    "cwd": "/Users/felixlunzenfichter/.openclaw/workspace",
+    "branch": "main",
+    "task": "Concurrent task in Governance",
+    "updatedAt": 1774691355946
+  },
+  {
+    "session": "hist-a",
+    "agent": "claude",
+    "model": "sonnet-4.5",
+    "status": "inactive",
+    "cwd": "/Users/felixlunzenfichter/Documents/GitReader",
+    "branch": "feat/tracked-agent-pr-demo",
+    "task": "History smoke A",
+    "updatedAt": 1774691427561
+  },
+  {
+    "session": "hist-b",
+    "agent": "claude",
+    "model": "sonnet-4.5",
+    "status": "inactive",
+    "cwd": "/Users/felixlunzenfichter/.openclaw/workspace",
+    "branch": "main",
+    "task": "History smoke B",
+    "updatedAt": 1774691428810
+  },
+  {
+    "session": "timeline-demo-run",
+    "agent": "claude",
+    "model": "sonnet-4.5",
+    "status": "running",
+    "cwd": "/Users/felixlunzenfichter/Documents/GitReader",
+    "branch": "feat/tracked-agent-pr-demo",
+    "task": "Timeline color-state demo run",
+    "updatedAt": 1774691603093
+  },
+  {
+    "session": "pr-update-timeline",
+    "agent": "claude",
+    "model": "sonnet-4.5",
+    "status": "running",
+    "cwd": "/Users/felixlunzenfichter/Documents/GitReader",
+    "branch": "feat/tracked-agent-pr-demo",
+    "task": "Update PR #6 with timeline-first and color-state changes",
+    "updatedAt": 1774691633821
+  }
+]

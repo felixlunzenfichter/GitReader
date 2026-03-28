@@ -53,16 +53,27 @@ function loadActiveContexts() {
   return [];
 }
 
-function findActiveContextForRepo(repoPath, branch, activeContexts) {
-  return activeContexts.find((ctx) => {
+function findContextForRepo(repoPath, branch, activeContexts) {
+  const matches = activeContexts.filter((ctx) => {
     const cwd = String(ctx.cwd || "");
     const ctxBranch = String(ctx.branch || "");
-    const status = String(ctx.status || "").toLowerCase();
     const matchesRepo = cwd === repoPath || (cwd && cwd.startsWith(repoPath + path.sep));
     const matchesBranch = !ctxBranch || ctxBranch === branch;
-    const isActiveStatus = !status || ["running", "working", "busy", "idle", "waiting", "error", "blocked"].includes(status);
-    return matchesRepo && matchesBranch && isActiveStatus;
+    return matchesRepo && matchesBranch;
   });
+
+  if (matches.length === 0) return undefined;
+
+  matches.sort((a, b) => {
+    const aActive = ["running", "working", "busy"].includes(String(a.status || "").toLowerCase()) ? 1 : 0;
+    const bActive = ["running", "working", "busy"].includes(String(b.status || "").toLowerCase()) ? 1 : 0;
+    if (aActive !== bActive) return bActive - aActive;
+    const at = Number(a.updatedAt || 0);
+    const bt = Number(b.updatedAt || 0);
+    return bt - at;
+  });
+
+  return matches[0];
 }
 
 function truncateMiddle(value, max = 42) {
@@ -78,7 +89,7 @@ function getGitDiff(repoPath, repoLabel) {
     const branch = gitExec("git rev-parse --abbrev-ref HEAD", repoPath);
     const repoName = repoLabel || path.basename(repoPath);
     const activeContexts = loadActiveContexts();
-    const activeContext = findActiveContextForRepo(repoPath, branch, activeContexts);
+    const activeContext = findContextForRepo(repoPath, branch, activeContexts);
 
     const compareBase = gitExecSafe("git show-ref --verify --quiet refs/heads/main && echo main || echo master", repoPath, "main");
 
@@ -107,18 +118,9 @@ function getGitDiff(repoPath, repoLabel) {
       prLines = [`# OPEN PRs: (gh unavailable)`];
     }
 
-    const active = Boolean(activeContext);
-    const agent = activeContext?.agent || "-";
-    const activeBranch = activeContext?.branch || branch;
-    const agentTask = activeContext?.task ? truncateMiddle(activeContext.task, 120) : "-";
-
     const header = [
       `# Repository: ${repoName}`,
       `# BRANCH: ${branch}`,
-      `# ACTIVE AGENT: ${agent}`,
-      `# ACTIVE: ${active ? "yes" : "no"}`,
-      `# AGENT BRANCH: ${activeBranch}`,
-      `# AGENT TASK: ${agentTask}`,
       `# vs: ${compareBase}`,
       `#`,
       `# LOCAL BRANCHES:`,
@@ -205,7 +207,39 @@ function getGitDiff(repoPath, repoLabel) {
   }
 }
 
+function loadTaskHistory(limit = 20) {
+  const p = path.resolve(__dirname, "task-history.jsonl");
+  try {
+    if (!fs.existsSync(p)) return [];
+    const lines = fs.readFileSync(p, "utf8").split("\n").filter(Boolean);
+    const parsed = lines.map((l) => {
+      try { return JSON.parse(l); } catch { return null; }
+    }).filter(Boolean);
+    return parsed.slice(-limit).reverse();
+  } catch {
+    return [];
+  }
+}
+
+function renderHistoryBlock() {
+  const history = loadTaskHistory(30);
+  const header = [
+    "# OpenClaw Task Timeline",
+    `# entries: ${history.length}`,
+    "#",
+  ];
+
+  const lines = history.map((h, i) => {
+    const when = new Date(Number(h.ts || 0)).toISOString();
+    const task = truncateMiddle(h.task || "-", 120);
+    return `# ${i + 1}. [${h.event}] [${h.status}] [${h.agent}] [${h.session}] [${h.branch}] ${when} :: ${task}`;
+  });
+
+  return [...header, ...(lines.length ? lines : ["# [no history yet]"]), "#"].join("\n");
+}
+
 function renderAllRepositories() {
+  const historyBlock = renderHistoryBlock();
   const repositoriesList = [
     "# All Repositories",
     ...REPOSITORIES.map((repo, index) => `# ${index + 1}. ${repo.label}`),
@@ -213,7 +247,7 @@ function renderAllRepositories() {
   ].join("\n");
 
   const sections = REPOSITORIES.map((repo) => getGitDiff(repo.repoPath, repo.label));
-  return [repositoriesList, ...sections].join("\n\n");
+  return [historyBlock, repositoriesList, ...sections].join("\n\n");
 }
 
 module.exports = { REPOSITORIES, renderAllRepositories };

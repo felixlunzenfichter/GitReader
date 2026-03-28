@@ -16,36 +16,80 @@ CMD="$*"
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SIDECAR="$ROOT_DIR/active-contexts.json"
+HISTORY="$ROOT_DIR/task-history.jsonl"
 
-cleanup() {
-  printf '[]\n' > "$SIDECAR"
+finalize() {
+  local rc=$?
+  local final_status="inactive"
+  if [ "$rc" -ne 0 ]; then
+    final_status="failed"
+  fi
+  upsert_context "$final_status"
+  append_history "task_finished" "$final_status"
 }
-trap cleanup EXIT
+trap finalize EXIT
 
-json_escape() {
-  python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$1"
+upsert_context() {
+  local status="$1"
+  python3 - "$SIDECAR" "$SESSION" "$AGENT" "$MODEL" "$CWD_PATH" "$BRANCH" "$TASK" "$status" <<'PY'
+import json,sys,time,os
+p,session,agent,model,cwd,branch,task,status = sys.argv[1:]
+arr=[]
+if os.path.exists(p):
+    try:
+        with open(p,'r',encoding='utf-8') as f:
+            v=json.load(f)
+            if isinstance(v,list): arr=v
+    except Exception:
+        arr=[]
+entry={
+  "session":session,
+  "agent":agent,
+  "model":model,
+  "status":status,
+  "cwd":cwd,
+  "branch":branch,
+  "task":task,
+  "updatedAt":int(time.time()*1000)
+}
+replaced=False
+for i,x in enumerate(arr):
+    if isinstance(x,dict) and x.get('session')==session:
+        arr[i]=entry
+        replaced=True
+        break
+if not replaced:
+    arr.append(entry)
+with open(p,'w',encoding='utf-8') as f:
+    json.dump(arr,f,indent=2)
+    f.write('\n')
+PY
 }
 
-SESSION_JSON=$(json_escape "$SESSION")
-AGENT_JSON=$(json_escape "$AGENT")
-MODEL_JSON=$(json_escape "$MODEL")
-CWD_JSON=$(json_escape "$CWD_PATH")
-BRANCH_JSON=$(json_escape "$BRANCH")
-TASK_JSON=$(json_escape "$TASK")
+append_history() {
+  local event="$1"
+  local status="$2"
+  python3 - "$HISTORY" "$SESSION" "$AGENT" "$MODEL" "$CWD_PATH" "$BRANCH" "$TASK" "$event" "$status" <<'PY'
+import json,sys,time
+p,session,agent,model,cwd,branch,task,event,status = sys.argv[1:]
+entry={
+  "ts": int(time.time()*1000),
+  "event": event,
+  "session": session,
+  "agent": agent,
+  "model": model,
+  "cwd": cwd,
+  "branch": branch,
+  "task": task,
+  "status": status,
+}
+with open(p,'a',encoding='utf-8') as f:
+  f.write(json.dumps(entry)+"\n")
+PY
+}
 
-cat > "$SIDECAR" <<JSON
-[
-  {
-    "session": ${SESSION_JSON},
-    "agent": ${AGENT_JSON},
-    "model": ${MODEL_JSON},
-    "status": "running",
-    "cwd": ${CWD_JSON},
-    "branch": ${BRANCH_JSON},
-    "task": ${TASK_JSON}
-  }
-]
-JSON
+upsert_context "running"
+append_history "task_started" "running"
 
 cd "$CWD_PATH"
 bash -lc "$CMD"
