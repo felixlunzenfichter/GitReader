@@ -21,6 +21,17 @@ function gitExec(cmd, repoPath) {
   return execSync(cmd, { cwd: repoPath, maxBuffer: 1024 * 1024, timeout: 5000 }).toString().trim();
 }
 
+function readFileContent(absPath) {
+  try {
+    const stat = fs.statSync(absPath);
+    if (!stat.isFile()) return "[not a regular file]";
+    const raw = fs.readFileSync(absPath, "utf8");
+    return raw.length > 4000 ? raw.slice(0, 4000) + "\n...[truncated]" : raw;
+  } catch {
+    return "[read failed]";
+  }
+}
+
 function getGitDiff(repoPath, repoLabel) {
   try {
     const branch = gitExec("git rev-parse --abbrev-ref HEAD", repoPath);
@@ -75,19 +86,7 @@ function getGitDiff(repoPath, repoLabel) {
       .map((l) => l.slice(3));
 
     const untrackedWithContent = untracked.map((relPath) => {
-      const absPath = path.join(repoPath, relPath);
-      let content = "[unreadable]";
-      try {
-        const stat = fs.statSync(absPath);
-        if (!stat.isFile()) {
-          content = "[not a regular file]";
-        } else {
-          const raw = fs.readFileSync(absPath, "utf8");
-          content = raw.length > 4000 ? raw.slice(0, 4000) + "\n...[truncated]" : raw;
-        }
-      } catch {
-        content = "[read failed]";
-      }
+      const content = readFileContent(path.join(repoPath, relPath));
       return `+  ${relPath}\n-----\n${content}\n-----`;
     });
 
@@ -96,19 +95,7 @@ function getGitDiff(repoPath, repoLabel) {
       .filter((f) => f);
 
     const unstagedFullContent = unstagedFiles.map((relPath) => {
-      const absPath = path.join(repoPath, relPath);
-      let content = "[unreadable]";
-      try {
-        const stat = fs.statSync(absPath);
-        if (!stat.isFile()) {
-          content = "[not a regular file]";
-        } else {
-          const raw = fs.readFileSync(absPath, "utf8");
-          content = raw.length > 4000 ? raw.slice(0, 4000) + "\n...[truncated]" : raw;
-        }
-      } catch {
-        content = "[read failed]";
-      }
+      const content = readFileContent(path.join(repoPath, relPath));
       return `~  ${relPath}\n-----\n${content}\n-----`;
     });
 
