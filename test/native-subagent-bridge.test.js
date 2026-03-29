@@ -121,3 +121,59 @@ test('direct OpenClaw session store produces native lifecycle timeline entries',
     else process.env.OPENCLAW_SESSIONS_DIR = prevSessionsDir;
   }
 });
+
+test('native OpenClaw events prefer normalized human task text over wrapper path and numbering', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'native-openclaw-human-task-'));
+  const sessionsDir = path.join(tmp, 'sessions');
+  fs.mkdirSync(sessionsDir, { recursive: true });
+
+  const sessionId = 'session-456';
+  const sessionKey = 'agent:main:subagent:def';
+  const sessionFile = path.join(sessionsDir, `${sessionId}.jsonl`);
+  const sessionsJson = path.join(sessionsDir, 'sessions.json');
+
+  fs.writeFileSync(sessionFile, JSON.stringify({
+    type: 'message',
+    message: {
+      content: [
+        {
+          type: 'text',
+          text: '[Subagent Task]: In /Users/felixlunzenfichter/Documents/GitReader:\n1) Fix native TTS titles\n2) Run tests\n3) Push branch\n\nGoal: keep it minimal'
+        }
+      ]
+    }
+  }) + '\n');
+
+  fs.writeFileSync(sessionsJson, JSON.stringify({
+    [sessionKey]: {
+      sessionId,
+      sessionFile,
+      startedAt: 1000,
+      updatedAt: 2000,
+      status: 'running',
+      label: 'tts-human-task-only',
+      model: 'gpt-5.4',
+      spawnedWorkspaceDir: '/tmp/workspace',
+      spawnDepth: 1,
+      subagentRole: 'leaf'
+    }
+  }, null, 2));
+
+  const prevSessionsPath = process.env.OPENCLAW_SESSIONS_PATH;
+  const prevSessionsDir = process.env.OPENCLAW_SESSIONS_DIR;
+  process.env.OPENCLAW_SESSIONS_PATH = sessionsJson;
+  process.env.OPENCLAW_SESSIONS_DIR = sessionsDir;
+
+  try {
+    withFreshRenderModule(({ loadNativeOpenClawEvents }) => {
+      const [event] = loadNativeOpenClawEvents(10);
+      assert.equal(event.task, 'Fix native TTS titles; Run tests; Push branch');
+      assert.notEqual(event.task, 'tts-human-task-only');
+    });
+  } finally {
+    if (prevSessionsPath === undefined) delete process.env.OPENCLAW_SESSIONS_PATH;
+    else process.env.OPENCLAW_SESSIONS_PATH = prevSessionsPath;
+    if (prevSessionsDir === undefined) delete process.env.OPENCLAW_SESSIONS_DIR;
+    else process.env.OPENCLAW_SESSIONS_DIR = prevSessionsDir;
+  }
+});

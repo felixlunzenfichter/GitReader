@@ -175,6 +175,26 @@ function parseJsonSafe(raw, fallback) {
   }
 }
 
+function normalizeSubagentTaskText(raw) {
+  if (typeof raw !== "string") return "";
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+
+  const withoutLocation = trimmed
+    .replace(/^In\s+[^\n:]+:\s*/i, "")
+    .replace(/^In\s+[^\n,]+,\s*/i, "");
+
+  const numbered = Array.from(withoutLocation.matchAll(/(?:^|\n)\s*\d+[.)]\s+([\s\S]*?)(?=(?:\n\s*\d+[.)]\s+)|$)/g))
+    .map((match) => match[1].replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+
+  if (numbered.length > 0) {
+    return numbered.join("; ");
+  }
+
+  return withoutLocation.replace(/\s+/g, " ").trim();
+}
+
 function extractTaskTextFromTranscript(sessionFile) {
   try {
     if (!sessionFile || !fs.existsSync(sessionFile)) return "";
@@ -188,7 +208,8 @@ function extractTaskTextFromTranscript(sessionFile) {
         const text = item.text;
         const match = text.match(/\[Subagent Task\]:\s*([\s\S]*?)(?:\n\n(?:Goal|Requirements|Use latest|Do not touch)|$)/i);
         if (match?.[1]) {
-          return match[1].replace(/\s+/g, " ").trim();
+          const normalized = normalizeSubagentTaskText(match[1]);
+          if (normalized) return normalized;
         }
       }
     }
