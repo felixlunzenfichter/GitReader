@@ -19,6 +19,7 @@ const REPOSITORIES = [
 
 const DEFAULT_OPENCLAW_SESSIONS_PATH = "/Users/felixlunzenfichter/.openclaw/agents/main/sessions/sessions.json";
 const DEFAULT_OPENCLAW_SESSIONS_DIR = "/Users/felixlunzenfichter/.openclaw/agents/main/sessions";
+const COMPAT_FALLBACK_ENV = "GITREADER_ENABLE_COMPAT_TASK_HISTORY";
 
 function gitExec(cmd, repoPath) {
   return execSync(cmd, { cwd: repoPath, maxBuffer: 1024 * 1024, timeout: 5000 }).toString().trim();
@@ -174,6 +175,26 @@ function parseJsonSafe(raw, fallback) {
   }
 }
 
+function normalizeSubagentTaskText(raw) {
+  if (typeof raw !== "string") return "";
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+
+  const withoutLocation = trimmed
+    .replace(/^In\s+[^\n:]+:\s*/i, "")
+    .replace(/^In\s+[^\n,]+,\s*/i, "");
+
+  const numbered = Array.from(withoutLocation.matchAll(/(?:^|\n)\s*\d+[.)]\s+([\s\S]*?)(?=(?:\n\s*\d+[.)]\s+)|$)/g))
+    .map((match) => match[1].replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+
+  if (numbered.length > 0) {
+    return numbered.join("; ");
+  }
+
+  return withoutLocation.replace(/\s+/g, " ").trim();
+}
+
 function extractTaskTextFromTranscript(sessionFile) {
   try {
     if (!sessionFile || !fs.existsSync(sessionFile)) return "";
@@ -187,7 +208,8 @@ function extractTaskTextFromTranscript(sessionFile) {
         const text = item.text;
         const match = text.match(/\[Subagent Task\]:\s*([\s\S]*?)(?:\n\n(?:Goal|Requirements|Use latest|Do not touch)|$)/i);
         if (match?.[1]) {
-          return match[1].replace(/\s+/g, " ").trim();
+          const normalized = normalizeSubagentTaskText(match[1]);
+          if (normalized) return normalized;
         }
       }
     }
@@ -300,12 +322,25 @@ function dedupeHistoryEntries(entries) {
   });
 }
 
-function loadTaskHistory(limit = 20) {
+function compatibilityFallbackEnabled() {
+  return process.env[COMPAT_FALLBACK_ENV] === "1";
+}
+
+function loadCompatibilityTaskHistory(limit = 20) {
   const legacy = loadJsonlHistory(limit);
   const native = loadNativeOpenClawEvents(limit);
   const merged = dedupeHistoryEntries([...native, ...legacy])
     .sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0));
   return merged.slice(0, limit);
+}
+
+function loadTaskHistory(limit = 20, options = {}) {
+  if (options.includeCompatibilityFallback ?? compatibilityFallbackEnabled()) {
+    return loadCompatibilityTaskHistory(limit);
+  }
+  return loadNativeOpenClawEvents(limit)
+    .sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0))
+    .slice(0, limit);
 }
 
 function renderTaskFinishedExtra(entry) {
@@ -335,8 +370,10 @@ function renderTaskFinishedExtra(entry) {
   return extra;
 }
 
+const VISIBLE_TASK_HISTORY_LIMIT = 6;
+
 function renderHistoryBlock() {
-  const history = loadTaskHistory(25);
+  const history = loadTaskHistory(VISIBLE_TASK_HISTORY_LIMIT);
   const header = [
     "# OpenClaw Task Timeline",
     `# entries: ${history.length}`,
@@ -371,4 +408,4 @@ function renderAllRepositories() {
   return [historyBlock, repositoriesList, ...sections].join("\n\n");
 }
 
-module.exports = { REPOSITORIES, renderAllRepositories, loadTaskHistory, loadNativeOpenClawEvents };
+module.exports = { REPOSITORIES, renderAllRepositories, renderHistoryBlock, loadTaskHistory, loadNativeOpenClawEvents, loadCompatibilityTaskHistory, compatibilityFallbackEnabled, COMPAT_FALLBACK_ENV };
