@@ -1,38 +1,49 @@
-# Native Sub-Agent Bridge (GitViewer)
+# Native OpenClaw Agent Events in GitReader
 
-This bridge makes native OpenClaw sub-agent runs visible in GitReader timeline + TTS by writing mapped events into `task-history.jsonl`.
+GitReader now reads native OpenClaw agent lifecycle directly from the local session store:
 
-## Default launcher
+- primary source: `~/.openclaw/agents/main/sessions/sessions.json`
+- transcript source: matching `*.jsonl` session files for task text + final summary
+- rendered as normal `task_started` / `task_finished` timeline rows in GitViewer
 
-Use the wrapper so start events are never forgotten:
+## Default path
+
+No wrapper is required for normal native OpenClaw visibility anymore.
+
+`render.js` synthesizes timeline entries directly from OpenClaw-native session lifecycle fields:
+
+- `startedAt` -> `task_started`
+- `updatedAt` + `status=done|failed` -> `task_finished`
+- transcript `[Subagent Task]` text -> task title
+- latest transcript text -> result summary
+
+This is the new default path for native agent visibility on iPad.
+
+## Compatibility fallback
+
+The old JSONL bridge is still available as a compatibility layer when you need to inject synthetic events manually:
 
 ```bash
-scripts/launch-native-subagent.sh \
-  "agent:main:subagent:abc" \
-  "run-123" \
-  "opus-4.6" \
-  "/Users/felixlunzenfichter/.openclaw/workspace" \
-  "main" \
-  "Research native subagents"
-```
+node scripts/native-subagent-bridge.js start \
+  --task "Research native subagents" \
+  --session-key "agent:main:subagent:abc" \
+  --run-id "run-123"
 
-## Finish event
-
-```bash
 node scripts/native-subagent-bridge.js finish \
   --task "Research native subagents" \
   --session-key "agent:main:subagent:abc" \
   --run-id "run-123" \
   --status "inactive" \
-  --result "wrote docs/native-subagents-display-properties-research.md" \
-  --model "opus-4.6" \
-  --runtime "subagent" \
-  --mode "run" \
-  --cwd "/Users/felixlunzenfichter/.openclaw/workspace" \
-  --branch "main"
+  --result "bridge path validated"
 ```
 
-## Notes
-- `render.js` shows `source`, `runtime`, `runId`, and `session_key` badges for timeline entries.
-- TTS works automatically because events are normalized to `task_started` / `task_finished`.
-- The wrapper exists to guarantee start-event visibility in UI/TTS for every native launch.
+## Timeline evidence fields
+
+GitReader shows these badges for both direct-native and compatibility events:
+
+- `source`
+- `runtime`
+- `runId`
+- `session_key`
+
+Because native lifecycle is normalized into the same `task_started` / `task_finished` shape, the existing GitViewer timeline feed and downstream iPad/TTS surfaces continue to work without a rewrite.

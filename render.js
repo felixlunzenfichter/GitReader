@@ -17,6 +17,9 @@ const REPOSITORIES = [
   },
 ];
 
+const DEFAULT_OPENCLAW_SESSIONS_PATH = "/Users/felixlunzenfichter/.openclaw/agents/main/sessions/sessions.json";
+const DEFAULT_OPENCLAW_SESSIONS_DIR = "/Users/felixlunzenfichter/.openclaw/agents/main/sessions";
+
 function gitExec(cmd, repoPath) {
   return execSync(cmd, { cwd: repoPath, maxBuffer: 1024 * 1024, timeout: 5000 }).toString().trim();
 }
@@ -149,7 +152,7 @@ function getGitDiff(repoPath, repoLabel) {
   }
 }
 
-function loadTaskHistory(limit = 20) {
+function loadJsonlHistory(limit = 20) {
   const p = path.resolve(__dirname, "task-history.jsonl");
   try {
     if (!fs.existsSync(p)) return [];
@@ -157,10 +160,152 @@ function loadTaskHistory(limit = 20) {
     const parsed = lines.map((l) => {
       try { return JSON.parse(l); } catch { return null; }
     }).filter(Boolean);
-    return parsed.slice(-limit).reverse();
+    return parsed.slice(-limit * 3);
   } catch {
     return [];
   }
+}
+
+function parseJsonSafe(raw, fallback) {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+}
+
+function extractTaskTextFromTranscript(sessionFile) {
+  try {
+    if (!sessionFile || !fs.existsSync(sessionFile)) return "";
+    const lines = fs.readFileSync(sessionFile, "utf8").split("\n").filter(Boolean);
+    for (const line of lines) {
+      const row = parseJsonSafe(line, null);
+      const content = row?.message?.content;
+      if (!Array.isArray(content)) continue;
+      for (const item of content) {
+        if (item?.type !== "text" || typeof item.text !== "string") continue;
+        const text = item.text;
+        const match = text.match(/\[Subagent Task\]:\s*([\s\S]*?)(?:\n\n(?:Goal|Requirements|Use latest|Do not touch)|$)/i);
+        if (match?.[1]) {
+          return match[1].replace(/\s+/g, " ").trim();
+        }
+      }
+    }
+  } catch {}
+  return "";
+}
+
+function extractResultSummaryFromTranscript(sessionFile) {
+  try {
+    if (!sessionFile || !fs.existsSync(sessionFile)) return "";
+    const lines = fs.readFileSync(sessionFile, "utf8").split("\n").filter(Boolean).reverse();
+    for (const line of lines) {
+      const row = parseJsonSafe(line, null);
+      const content = row?.message?.content;
+      if (!Array.isArray(content)) continue;
+      const texts = content
+        .filter((item) => item?.type === "text" && typeof item.text === "string")
+        .map((item) => item.text.trim())
+        .filter(Boolean);
+      if (!texts.length) continue;
+      const joined = texts.join(" ").replace(/\s+/g, " ").trim();
+      if (joined && !joined.includes("[Subagent Task]")) {
+        return truncateMiddle(joined, 220);
+      }
+    }
+  } catch {}
+  return "";
+}
+
+function mapNativeStatus(status) {
+  if (status === "running") return { start: "running", finish: null };
+  if (status === "done") return { start: "running", finish: "inactive" };
+  if (status === "failed") return { start: "running", finish: "failed" };
+  return { start: "running", finish: status || "inactive" };
+}
+
+function loadNativeOpenClawEvents(limit = 20) {
+  const sessionsPath = process.env.OPENCLAW_SESSIONS_PATH || DEFAULT_OPENCLAW_SESSIONS_PATH;
+  const sessionsDir = process.env.OPENCLAW_SESSIONS_DIR || DEFAULT_OPENCLAW_SESSIONS_DIR;
+  try {
+    if (!fs.existsSync(sessionsPath)) return [];
+    const raw = parseJsonSafe(fs.readFileSync(sessionsPath, "utf8"), {});
+    const values = Object.entries(raw)
+      .filter(([sessionKey, row]) => sessionKey.includes(":subagent:") && row && typeof row === "object")
+      .map(([sessionKey, row]) => ({ sessionKey, ...row }));
+
+    const recent = values
+      .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))
+      .slice(0, limit);
+
+    const events = [];
+    for (const row of recent) {
+      const sessionFile = row.sessionFile || path.join(sessionsDir, `${row.sessionId}.jsonl`);
+      const task = extractTaskTextFromTranscript(sessionFile) || row.label || row.sessionKey;
+      const mapped = mapNativeStatus(row.status);
+      const base = {
+        session: row.sessionKey,
+        session_key: row.sessionKey,
+        runId: row.sessionId || "",
+        agent: "native-openclaw-agent",
+        model: row.model || "-",
+        runtime: row.subagentRole || "subagent",
+        mode: row.spawnDepth != null ? `depth:${row.spawnDepth}` : "run",
+        cwd: row.spawnedWorkspaceDir || "-",
+        branch: row.branch || "-",
+        task,
+        source: "openclaw-native-events",
+        changedFiles: [],
+      };
+
+      if (row.startedAt) {
+        events.push({
+          ...base,
+          ts: Number(row.startedAt),
+          event: "task_started",
+          status: mapped.start,
+        });
+      }
+
+      if (row.updatedAt && mapped.finish) {
+        const resultSummary = extractResultSummaryFromTranscript(sessionFile);
+        events.push({
+          ...base,
+          ts: Number(row.updatedAt),
+          event: "task_finished",
+          status: mapped.finish,
+          ...(resultSummary ? { resultSummary } : {}),
+        });
+      }
+    }
+    return events;
+  } catch {
+    return [];
+  }
+}
+
+function dedupeHistoryEntries(entries) {
+  const seen = new Set();
+  return entries.filter((entry) => {
+    const key = [
+      entry.event || "-",
+      entry.session_key || entry.session || "-",
+      entry.runId || "-",
+      entry.status || "-",
+      entry.task || "-",
+    ].join("|");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function loadTaskHistory(limit = 20) {
+  const legacy = loadJsonlHistory(limit);
+  const native = loadNativeOpenClawEvents(limit);
+  const merged = dedupeHistoryEntries([...native, ...legacy])
+    .sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0));
+  return merged.slice(0, limit);
 }
 
 function renderTaskFinishedExtra(entry) {
@@ -226,4 +371,4 @@ function renderAllRepositories() {
   return [historyBlock, repositoriesList, ...sections].join("\n\n");
 }
 
-module.exports = { REPOSITORIES, renderAllRepositories };
+module.exports = { REPOSITORIES, renderAllRepositories, loadTaskHistory, loadNativeOpenClawEvents };
