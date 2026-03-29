@@ -4,11 +4,12 @@ const os = require("os");
 const path = require("path");
 const fs = require("fs");
 const { announceTaskEvent, speakWithOpenAI } = require("./tts.js");
+const { loadTaskHistory } = require("./render.js");
 
-const PORT = 9876;
+const PORT = Number(process.env.PORT || 9876);
 const POLL_INTERVAL = 2000; // ms
 const RENDER_PATH = path.resolve(__dirname, "render.js");
-const HISTORY_PATH = path.resolve(__dirname, "task-history.jsonl");
+const HISTORY_PATH = process.env.GITREADER_HISTORY_PATH || path.resolve(__dirname, "task-history.jsonl");
 const SECRETS_PATH = path.resolve(__dirname, ".secrets/openai.env");
 
 function loadSecretsFromEnv(filePath) {
@@ -100,34 +101,61 @@ function broadcastAudio(audioBuffer) {
   }
 }
 
+function eventTTSKey(entry) {
+  return [
+    entry.event || "-",
+    entry.session_key || entry.session || "-",
+    entry.runId || "-",
+    Number(entry.ts || 0),
+    entry.task || "-",
+  ].join("|");
+}
+
+const seenTTSEvents = new Set();
+
+function seedSeenTTSEventsFromCurrentHistory() {
+  const existingEntries = loadTaskHistory(200);
+  for (const entry of existingEntries) {
+    seenTTSEvents.add(eventTTSKey(entry));
+  }
+  console.log(`[TTS] Seeded ${existingEntries.length} historical event(s); only fresh events after launch will be spoken`);
+}
+
+seedSeenTTSEventsFromCurrentHistory();
+
+async function maybeSpeakTaskEvent(entry) {
+  const key = eventTTSKey(entry);
+  if (seenTTSEvents.has(key)) return;
+  seenTTSEvents.add(key);
+
+  console.log(`[TTS] Started TTS — event: ${entry.event}, task: "${entry.task}"`);
+  try {
+    const audio = await announceTaskEvent(entry, speakWithOpenAI);
+    if (!audio) {
+      console.log(`[TTS] Finished TTS — skipped (unknown event: ${entry.event})`);
+      return;
+    }
+
+    playAudioLocally(audio);
+    broadcastAudio(audio);
+    console.log(`[TTS] Finished TTS — success: ${audio.length} bytes, sent to ${wss.clients.size} client(s), playing locally`);
+  } catch (err) {
+    console.error(`[TTS] Finished TTS — error: ${err.message}`);
+  }
+}
+
 async function processNewHistoryEntries() {
+  const entries = loadTaskHistory(200)
+    .sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0));
+
+  for (const entry of entries) {
+    await maybeSpeakTaskEvent(entry);
+  }
+
   if (!fs.existsSync(HISTORY_PATH)) return;
   const content = fs.readFileSync(HISTORY_PATH, "utf8");
   const lines = content.split("\n").filter(Boolean);
-  if (lines.length <= lastHistoryLineCount) return;
-
-  const newLines = lines.slice(lastHistoryLineCount);
   lastHistoryLineCount = lines.length;
-
-  for (const line of newLines) {
-    let entry;
-    try { entry = JSON.parse(line); } catch { continue; }
-
-    console.log(`[TTS] Started TTS — event: ${entry.event}, task: "${entry.task}"`);
-    try {
-      const audio = await announceTaskEvent(entry, speakWithOpenAI);
-      if (!audio) {
-        console.log(`[TTS] Finished TTS — skipped (unknown event: ${entry.event})`);
-        continue;
-      }
-
-      playAudioLocally(audio);
-      broadcastAudio(audio);
-      console.log(`[TTS] Finished TTS — success: ${audio.length} bytes, sent to ${wss.clients.size} client(s), playing locally`);
-    } catch (err) {
-      console.error(`[TTS] Finished TTS — error: ${err.message}`);
-    }
-  }
 }
 
 setInterval(async () => {

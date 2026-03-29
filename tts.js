@@ -11,6 +11,12 @@ async function announceTaskEvent({ event, task }, speak) {
 
 async function speakWithOpenAI(text) {
   console.log(`[TTS] request: "${text}"`);
+  if (process.env.GITREADER_TTS_STUB === "1") {
+    const buf = Buffer.from(`stub:${text}`, "utf8");
+    console.log(`[TTS] OK(STUB): ${buf.length} bytes for "${text}"`);
+    return buf;
+  }
+
   const key = process.env.OPENAI_API_KEY;
   if (!key) {
     console.error("[TTS] FAIL: OPENAI_API_KEY not set");
