@@ -11,7 +11,7 @@ final class WebSocketClient {
     private let serverURL: URL
     private var audioPlayer: AVAudioPlayer?
 
-    init(serverURL: URL = URL(string: "ws://192.168.1.23:9876")!) {
+    init(serverURL: URL = URL(string: "ws://felixs-macbook-pro.tailcfdca5.ts.net:9876")!) {
         self.serverURL = serverURL
     }
 
