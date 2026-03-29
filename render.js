@@ -175,6 +175,9 @@ function renderTaskFinishedExtra(entry) {
       extra.push("#    changes: [none]");
     }
   }
+  if (entry.resultSummary) {
+    extra.push(`#    result: ${entry.resultSummary}`);
+  }
   if (entry.diffPreview) {
     const MAX_RENDER = 20;
     const diffLines = entry.diffPreview.split("\n");
@@ -199,7 +202,11 @@ function renderHistoryBlock() {
     const when = new Date(Number(h.ts || 0)).toISOString();
     const task = truncateMiddle(h.task || "-", 120);
     const model = h.model || "-";
-    const main = `# ${i + 1}. [${h.event}] [${h.status}] [${h.agent}] [${model}] [${h.session}] [${h.branch}] ${when} :: ${task}`;
+    const source = h.source || "tracked-worker";
+    const runtimeBadge = h.runtime ? `[${h.runtime}]` : "";
+    const runIdBadge = h.runId ? `[run:${truncateMiddle(h.runId, 16)}]` : "";
+    const sessionKeyBadge = h.session_key ? `[sk:${truncateMiddle(h.session_key, 18)}]` : "";
+    const main = `# ${i + 1}. [${h.event}] [${h.status}] [${source}] [${h.agent}] [${model}] ${runtimeBadge} ${runIdBadge} ${sessionKeyBadge} [${h.session}] [${h.branch}] ${when} :: ${task}`.replace(/\s+/g, ' ').trim();
     const extra = h.event === "task_finished" ? renderTaskFinishedExtra(h) : [];
     return [main, ...extra];
   });
