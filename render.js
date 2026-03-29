@@ -335,8 +335,10 @@ function renderTaskFinishedExtra(entry) {
   return extra;
 }
 
+const VISIBLE_TASK_HISTORY_LIMIT = 6;
+
 function renderHistoryBlock() {
-  const history = loadTaskHistory(25);
+  const history = loadTaskHistory(VISIBLE_TASK_HISTORY_LIMIT);
   const header = [
     "# OpenClaw Task Timeline",
     `# entries: ${history.length}`,
@@ -371,4 +373,4 @@ function renderAllRepositories() {
   return [historyBlock, repositoriesList, ...sections].join("\n\n");
 }
 
-module.exports = { REPOSITORIES, renderAllRepositories, loadTaskHistory, loadNativeOpenClawEvents };
+module.exports = { REPOSITORIES, renderAllRepositories, renderHistoryBlock, loadTaskHistory, loadNativeOpenClawEvents };
