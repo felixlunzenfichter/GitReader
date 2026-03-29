@@ -5,7 +5,7 @@ const path = require("path");
 const fs = require("fs");
 const { announceTaskEvent, speakWithOpenAI } = require("./tts.js");
 const { TTSQueue, stableEventKey } = require("./tts-queue.js");
-const { loadTaskHistory } = require("./render.js");
+const { loadTaskHistory, compatibilityFallbackEnabled, COMPAT_FALLBACK_ENV } = require("./render.js");
 
 const PORT = Number(process.env.PORT || 9876);
 const POLL_INTERVAL = 2000; // ms
@@ -38,7 +38,7 @@ function render() {
 }
 
 function loadFreshTaskEvents(limit = 200) {
-  return renderModule().loadTaskHistory(limit)
+  return renderModule().loadTaskHistory(limit, { includeCompatibilityFallback: compatibilityFallbackEnabled() })
     .sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0));
 }
 
@@ -64,6 +64,7 @@ console.log("Configured repositories:");
 for (const repo of REPOSITORIES) {
   console.log(`- ${repo.label}: ${repo.repoPath}`);
 }
+console.log(`Task timeline/TTS source: ${compatibilityFallbackEnabled() ? `native + compatibility fallback (${COMPAT_FALLBACK_ENV}=1)` : "native OpenClaw events only"}`);
 console.log("Waiting for connection...\n");
 
 wss.on("connection", (ws, req) => {
@@ -97,13 +98,16 @@ setInterval(() => {
 }, POLL_INTERVAL);
 
 // --- TTS watcher: announce task lifecycle events ---
-let lastHistoryLineCount = 0;
-try {
-  const content = fs.readFileSync(HISTORY_PATH, "utf8");
-  lastHistoryLineCount = content.split("\n").filter(Boolean).length;
-  console.log(`[TTS] Watching task-history.jsonl (${lastHistoryLineCount} existing entries)`);
-} catch {
-  console.log("[TTS] No task-history.jsonl yet — will watch for creation");
+if (compatibilityFallbackEnabled()) {
+  try {
+    const content = fs.readFileSync(HISTORY_PATH, "utf8");
+    const lastHistoryLineCount = content.split("\n").filter(Boolean).length;
+    console.log(`[TTS] Compatibility fallback watching task-history.jsonl (${lastHistoryLineCount} existing entries)`);
+  } catch {
+    console.log("[TTS] Compatibility fallback enabled — will watch for task-history.jsonl creation");
+  }
+} else {
+  console.log("[TTS] Using native OpenClaw session events; task-history compatibility fallback disabled by default");
 }
 
 function playAudioLocally(audioBuffer, entry) {
@@ -186,10 +190,9 @@ async function processNewHistoryEntries() {
     broadcastJson({ type: "task_event", entry });
   }
 
-  if (!fs.existsSync(HISTORY_PATH)) return;
+  if (!compatibilityFallbackEnabled() || !fs.existsSync(HISTORY_PATH)) return;
   const content = fs.readFileSync(HISTORY_PATH, "utf8");
-  const lines = content.split("\n").filter(Boolean);
-  lastHistoryLineCount = lines.length;
+  content.split("\n").filter(Boolean);
 }
 
 setInterval(async () => {

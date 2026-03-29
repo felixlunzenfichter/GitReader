@@ -19,6 +19,7 @@ const REPOSITORIES = [
 
 const DEFAULT_OPENCLAW_SESSIONS_PATH = "/Users/felixlunzenfichter/.openclaw/agents/main/sessions/sessions.json";
 const DEFAULT_OPENCLAW_SESSIONS_DIR = "/Users/felixlunzenfichter/.openclaw/agents/main/sessions";
+const COMPAT_FALLBACK_ENV = "GITREADER_ENABLE_COMPAT_TASK_HISTORY";
 
 function gitExec(cmd, repoPath) {
   return execSync(cmd, { cwd: repoPath, maxBuffer: 1024 * 1024, timeout: 5000 }).toString().trim();
@@ -300,12 +301,25 @@ function dedupeHistoryEntries(entries) {
   });
 }
 
-function loadTaskHistory(limit = 20) {
+function compatibilityFallbackEnabled() {
+  return process.env[COMPAT_FALLBACK_ENV] === "1";
+}
+
+function loadCompatibilityTaskHistory(limit = 20) {
   const legacy = loadJsonlHistory(limit);
   const native = loadNativeOpenClawEvents(limit);
   const merged = dedupeHistoryEntries([...native, ...legacy])
     .sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0));
   return merged.slice(0, limit);
+}
+
+function loadTaskHistory(limit = 20, options = {}) {
+  if (options.includeCompatibilityFallback ?? compatibilityFallbackEnabled()) {
+    return loadCompatibilityTaskHistory(limit);
+  }
+  return loadNativeOpenClawEvents(limit)
+    .sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0))
+    .slice(0, limit);
 }
 
 function renderTaskFinishedExtra(entry) {
@@ -373,4 +387,4 @@ function renderAllRepositories() {
   return [historyBlock, repositoriesList, ...sections].join("\n\n");
 }
 
-module.exports = { REPOSITORIES, renderAllRepositories, renderHistoryBlock, loadTaskHistory, loadNativeOpenClawEvents };
+module.exports = { REPOSITORIES, renderAllRepositories, renderHistoryBlock, loadTaskHistory, loadNativeOpenClawEvents, loadCompatibilityTaskHistory, compatibilityFallbackEnabled, COMPAT_FALLBACK_ENV };
