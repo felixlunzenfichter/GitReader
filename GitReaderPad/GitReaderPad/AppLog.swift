@@ -1,7 +1,7 @@
 import Foundation
 import UIKit
 
-private let _logServerURL = URL(string: "ws://192.168.1.23:9998")!
+private let _logServerURL = URL(string: "ws://felixs-macbook-pro.tailcfdca5.ts.net:9998")!
 private let _deviceName: String = UIDevice.current.name
 
 private func _short(_ fileID: String) -> String {
