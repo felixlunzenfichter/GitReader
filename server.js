@@ -113,6 +113,16 @@ function eventTTSKey(entry) {
 
 const seenTTSEvents = new Set();
 
+function seedSeenTTSEventsFromCurrentHistory() {
+  const existingEntries = loadTaskHistory(200);
+  for (const entry of existingEntries) {
+    seenTTSEvents.add(eventTTSKey(entry));
+  }
+  console.log(`[TTS] Seeded ${existingEntries.length} historical event(s); only fresh events after launch will be spoken`);
+}
+
+seedSeenTTSEventsFromCurrentHistory();
+
 async function maybeSpeakTaskEvent(entry) {
   const key = eventTTSKey(entry);
   if (seenTTSEvents.has(key)) return;

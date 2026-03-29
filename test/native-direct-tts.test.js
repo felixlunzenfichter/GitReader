@@ -22,41 +22,62 @@ function waitFor(predicate, timeoutMs = 8000, intervalMs = 100) {
   });
 }
 
-test('server speaks direct native OpenClaw events from session store', async (t) => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'native-direct-tts-'));
-  const sessionsDir = path.join(tmp, 'sessions');
-  fs.mkdirSync(sessionsDir, { recursive: true });
-  const historyPath = path.join(tmp, 'task-history.jsonl');
-  fs.writeFileSync(historyPath, '');
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
-  const sessionId = 'session-tts-123';
-  const sessionKey = 'agent:main:subagent:tts-123';
+function writeSession({ sessionsDir, sessionId, sessionKey, task, resultText, startedAt, updatedAt, status }) {
   const sessionFile = path.join(sessionsDir, `${sessionId}.jsonl`);
-  const sessionsJson = path.join(sessionsDir, 'sessions.json');
-  fs.writeFileSync(sessionFile, [
+  const transcript = [
     JSON.stringify({
       type: 'message',
-      message: { content: [{ type: 'text', text: '[Subagent Task]: Native direct TTS proof\n\nGoal: speak aloud' }] }
-    }),
-    JSON.stringify({
-      type: 'message',
-      message: { content: [{ type: 'text', text: 'Native direct task finished cleanly.' }] }
+      message: { content: [{ type: 'text', text: `[Subagent Task]: ${task}\n\nGoal: speak aloud` }] }
     })
-  ].join('\n'));
-  fs.writeFileSync(sessionsJson, JSON.stringify({
+  ];
+
+  if (resultText) {
+    transcript.push(JSON.stringify({
+      type: 'message',
+      message: { content: [{ type: 'text', text: resultText }] }
+    }));
+  }
+
+  fs.writeFileSync(sessionFile, transcript.join('\n'));
+  return {
     [sessionKey]: {
       sessionId,
       sessionFile,
-      startedAt: Date.now() - 1000,
-      updatedAt: Date.now(),
-      status: 'done',
-      label: 'fallback-label',
+      startedAt,
+      updatedAt,
+      status,
+      label: `label-${sessionId}`,
       model: 'gpt-5.4',
       spawnedWorkspaceDir: '/tmp/workspace',
       spawnDepth: 1,
       subagentRole: 'subagent'
     }
-  }, null, 2));
+  };
+}
+
+test('server ignores backfilled native events at startup and only speaks fresh ones', async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'native-direct-tts-'));
+  const sessionsDir = path.join(tmp, 'sessions');
+  fs.mkdirSync(sessionsDir, { recursive: true });
+  const historyPath = path.join(tmp, 'task-history.jsonl');
+  fs.writeFileSync(historyPath, '');
+  const sessionsJson = path.join(sessionsDir, 'sessions.json');
+
+  const historicalSession = writeSession({
+    sessionsDir,
+    sessionId: 'session-old-123',
+    sessionKey: 'agent:main:subagent:old-123',
+    task: 'Historical native task',
+    resultText: 'Historical native task finished before launch.',
+    startedAt: Date.now() - 60_000,
+    updatedAt: Date.now() - 55_000,
+    status: 'done'
+  });
+  fs.writeFileSync(sessionsJson, JSON.stringify(historicalSession, null, 2));
 
   const child = spawn(process.execPath, ['server.js'], {
     cwd: path.resolve(__dirname, '..'),
@@ -80,12 +101,37 @@ test('server speaks direct native OpenClaw events from session store', async (t)
   });
 
   await waitFor(() => logs.includes('WebSocket server on ws://0.0.0.0:19876'));
-  await waitFor(() => logs.includes('Started TTS — event: task_started, task: "Native direct TTS proof"'));
-  await waitFor(() => logs.includes('Started TTS — event: task_finished, task: "Native direct TTS proof"'));
-  await waitFor(() => logs.includes('OK(STUB):'));
+  await waitFor(() => logs.includes('only fresh events after launch will be spoken'));
+  await sleep(2500);
+  assert.doesNotMatch(logs, /Historical native task/);
 
-  assert.match(logs, /Started TTS — event: task_started, task: "Native direct TTS proof"/);
-  assert.match(logs, /Started TTS — event: task_finished, task: "Native direct TTS proof"/);
-  assert.match(logs, /request: "Started: Native direct TTS proof"/);
-  assert.match(logs, /request: "Finished: Native direct TTS proof"/);
+  const freshSessionKey = 'agent:main:subagent:fresh-123';
+  const freshSessionId = 'session-fresh-123';
+  const freshStartedAt = Date.now();
+  fs.writeFileSync(sessionsJson, JSON.stringify(writeSession({
+    sessionsDir,
+    sessionId: freshSessionId,
+    sessionKey: freshSessionKey,
+    task: 'Fresh native task',
+    startedAt: freshStartedAt,
+    updatedAt: freshStartedAt,
+    status: 'running'
+  }), null, 2));
+
+  await waitFor(() => logs.includes('Started TTS — event: task_started, task: "Fresh native task"'));
+  assert.match(logs, /request: "Started: Fresh native task"/);
+
+  fs.writeFileSync(sessionsJson, JSON.stringify(writeSession({
+    sessionsDir,
+    sessionId: freshSessionId,
+    sessionKey: freshSessionKey,
+    task: 'Fresh native task',
+    resultText: 'Fresh native task finished cleanly.',
+    startedAt: freshStartedAt,
+    updatedAt: freshStartedAt + 1000,
+    status: 'done'
+  }), null, 2));
+
+  await waitFor(() => logs.includes('Started TTS — event: task_finished, task: "Fresh native task"'));
+  assert.match(logs, /request: "Finished: Fresh native task"/);
 });
