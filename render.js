@@ -191,7 +191,7 @@ function renderTaskFinishedExtra(entry) {
 }
 
 function renderHistoryBlock() {
-  const history = loadTaskHistory(30);
+  const history = loadTaskHistory(25);
   const header = [
     "# OpenClaw Task Timeline",
     `# entries: ${history.length}`,
