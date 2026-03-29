@@ -5,6 +5,7 @@ GitReader now reads native OpenClaw agent lifecycle directly from the local sess
 - primary source: `~/.openclaw/agents/main/sessions/sessions.json`
 - transcript source: matching `*.jsonl` session files for task text + final summary
 - rendered as normal `task_started` / `task_finished` timeline rows in GitViewer
+- emitted live over WebSocket as explicit `task_event` envelopes so the iPad can log/react before the next full diff refresh
 
 ## Default path
 
@@ -47,3 +48,16 @@ GitReader shows these badges for both direct-native and compatibility events:
 - `session_key`
 
 Because native lifecycle is normalized into the same `task_started` / `task_finished` shape, the existing GitViewer timeline feed and downstream iPad/TTS surfaces continue to work without a rewrite.
+
+## Live transport shape
+
+The WebSocket server now sends two explicit message envelopes:
+
+- `{ "type": "diff", "diff": "..." }`
+- `{ "type": "task_event", "entry": { ...normalized native lifecycle row... } }`
+
+`task_event` is emitted as soon as a fresh native lifecycle row is observed, so the iPad can:
+
+- log native starts/finishes distinctly
+- show a live overlay row immediately
+- treat the event as TTS-eligible without waiting for the next snapshot diff refresh

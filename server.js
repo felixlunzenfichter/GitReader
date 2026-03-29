@@ -4,6 +4,7 @@ const os = require("os");
 const path = require("path");
 const fs = require("fs");
 const { announceTaskEvent, speakWithOpenAI } = require("./tts.js");
+const { TTSQueue, stableEventKey, collapseBurst } = require("./tts-queue.js");
 const { loadTaskHistory } = require("./render.js");
 
 const PORT = Number(process.env.PORT || 9876);
@@ -26,10 +27,30 @@ function loadSecretsFromEnv(filePath) {
 
 loadSecretsFromEnv(SECRETS_PATH);
 
+function renderModule() {
+  delete require.cache[RENDER_PATH];
+  return require(RENDER_PATH);
+}
+
 // Hot-reload render module on each call (edits take effect within 2s, no restart)
 function render() {
-  delete require.cache[RENDER_PATH];
-  return require(RENDER_PATH).renderAllRepositories();
+  return renderModule().renderAllRepositories();
+}
+
+function loadFreshTaskEvents(limit = 200) {
+  return renderModule().loadTaskHistory(limit)
+    .sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0));
+}
+
+function sendJson(ws, payload) {
+  ws.send(JSON.stringify(payload));
+}
+
+function broadcastJson(payload) {
+  const encoded = JSON.stringify(payload);
+  for (const ws of wss.clients) {
+    if (ws.readyState === WebSocket.OPEN) ws.send(encoded);
+  }
 }
 
 // --- Server ---
@@ -55,7 +76,7 @@ wss.on("connection", (ws, req) => {
       const diff = render();
       lastDiff = diff;
       console.log(`Sending initial diff: ${diff.split("\n").length} lines`);
-      ws.send(diff);
+      sendJson(ws, { type: "diff", diff });
     }
   });
 
@@ -72,9 +93,7 @@ setInterval(() => {
 
   lastDiff = diff;
   console.log(`Diff changed: ${diff.split("\n").length} lines — pushing to ${wss.clients.size} client(s)`);
-  for (const ws of wss.clients) {
-    if (ws.readyState === WebSocket.OPEN) ws.send(diff);
-  }
+  broadcastJson({ type: "diff", diff });
 }, POLL_INTERVAL);
 
 // --- TTS watcher: announce task lifecycle events ---
@@ -87,47 +106,59 @@ try {
   console.log("[TTS] No task-history.jsonl yet — will watch for creation");
 }
 
-function playAudioLocally(audioBuffer) {
-  const tmpFile = path.join(os.tmpdir(), `tts-${Date.now()}.mp3`);
+function playAudioLocally(audioBuffer, entry) {
+  const tmpFile = path.join(os.tmpdir(), `tts-${Date.now()}-${process.pid}.mp3`);
   fs.writeFileSync(tmpFile, audioBuffer);
-  exec(`afplay "${tmpFile}" && rm "${tmpFile}"`, (err) => {
-    if (err) console.error(`[TTS] Local playback error: ${err.message}`);
+
+  return new Promise((resolve) => {
+    console.log(`[TTS] Local playback queued — event: ${entry.event}, task: "${entry.task}"`);
+    exec(`afplay "${tmpFile}"`, (err) => {
+      try {
+        fs.unlinkSync(tmpFile);
+      } catch {}
+
+      if (err) {
+        console.error(`[TTS] Local playback error: ${err.message}`);
+      } else {
+        console.log(`[TTS] Local playback finished — event: ${entry.event}, task: "${entry.task}"`);
+      }
+      resolve();
+    });
   });
 }
 
-function broadcastAudio(audioBuffer) {
+function broadcastAudio(audioBuffer, entry) {
+  console.log(`[TTS] Broadcasting audio — event: ${entry.event}, task: "${entry.task}", clients: ${wss.clients.size}`);
   for (const ws of wss.clients) {
     if (ws.readyState === WebSocket.OPEN) ws.send(audioBuffer);
   }
 }
 
-function eventTTSKey(entry) {
-  return [
-    entry.event || "-",
-    entry.session_key || entry.session || "-",
-    entry.runId || "-",
-    Number(entry.ts || 0),
-    entry.task || "-",
-  ].join("|");
-}
-
-const seenTTSEvents = new Set();
+const ttsQueue = new TTSQueue({
+  shortTaskThresholdMs: 2500,
+  onSkip({ reason, entry }) {
+    if (reason === "duplicate") {
+      console.log(`[TTS] Skipped duplicate event — key: ${stableEventKey(entry)}`);
+      return;
+    }
+    if (reason === "collapsed_short_task") {
+      console.log(`[TTS] Collapsed short task burst — skipped start/finish spam for: ${entry.task}`);
+    }
+  },
+  async speakEvent(entry) {
+    await maybeSpeakTaskEvent(entry);
+  },
+});
 
 function seedSeenTTSEventsFromCurrentHistory() {
   const existingEntries = loadTaskHistory(200);
-  for (const entry of existingEntries) {
-    seenTTSEvents.add(eventTTSKey(entry));
-  }
+  ttsQueue.seed(existingEntries);
   console.log(`[TTS] Seeded ${existingEntries.length} historical event(s); only fresh events after launch will be spoken`);
 }
 
 seedSeenTTSEventsFromCurrentHistory();
 
 async function maybeSpeakTaskEvent(entry) {
-  const key = eventTTSKey(entry);
-  if (seenTTSEvents.has(key)) return;
-  seenTTSEvents.add(key);
-
   console.log(`[TTS] Started TTS — event: ${entry.event}, task: "${entry.task}"`);
   try {
     const audio = await announceTaskEvent(entry, speakWithOpenAI);
@@ -136,9 +167,9 @@ async function maybeSpeakTaskEvent(entry) {
       return;
     }
 
-    playAudioLocally(audio);
-    broadcastAudio(audio);
-    console.log(`[TTS] Finished TTS — success: ${audio.length} bytes, sent to ${wss.clients.size} client(s), playing locally`);
+    broadcastAudio(audio, entry);
+    await playAudioLocally(audio, entry);
+    console.log(`[TTS] Finished TTS — success: ${audio.length} bytes, sent to ${wss.clients.size} client(s), playback drained`);
   } catch (err) {
     console.error(`[TTS] Finished TTS — error: ${err.message}`);
   }
@@ -149,6 +180,12 @@ async function processNewHistoryEntries() {
     .sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0));
 
   for (const entry of entries) {
+    const key = eventTTSKey(entry);
+    if (seenTTSEvents.has(key)) continue;
+    seenTTSEvents.add(key);
+
+    console.log(`[LIVE] Native task event: ${entry.event} :: ${entry.task} :: ${entry.session_key || entry.session || "-"}`);
+    broadcastJson({ type: "task_event", entry });
     await maybeSpeakTaskEvent(entry);
   }
 
