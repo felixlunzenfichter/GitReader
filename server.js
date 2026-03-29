@@ -4,7 +4,7 @@ const os = require("os");
 const path = require("path");
 const fs = require("fs");
 const { announceTaskEvent, speakWithOpenAI } = require("./tts.js");
-const { TTSQueue, stableEventKey, collapseBurst } = require("./tts-queue.js");
+const { TTSQueue, stableEventKey } = require("./tts-queue.js");
 const { loadTaskHistory } = require("./render.js");
 
 const PORT = Number(process.env.PORT || 9876);
@@ -138,7 +138,7 @@ const ttsQueue = new TTSQueue({
   shortTaskThresholdMs: 2500,
   onSkip({ reason, entry }) {
     if (reason === "duplicate") {
-      console.log(`[TTS] Skipped duplicate event — key: ${stableEventKey(entry)}`);
+      console.log(`[TTS] Skipped duplicate event — event: ${entry.event}, source: ${entry.source || "-"}`);
       return;
     }
     if (reason === "collapsed_short_task") {
@@ -176,17 +176,14 @@ async function maybeSpeakTaskEvent(entry) {
 }
 
 async function processNewHistoryEntries() {
-  const entries = loadTaskHistory(200)
-    .sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0));
+  const entries = loadFreshTaskEvents(200);
 
   for (const entry of entries) {
-    const key = eventTTSKey(entry);
-    if (seenTTSEvents.has(key)) continue;
-    seenTTSEvents.add(key);
+    const queued = ttsQueue.enqueue(entry);
+    if (!queued) continue;
 
     console.log(`[LIVE] Native task event: ${entry.event} :: ${entry.task} :: ${entry.session_key || entry.session || "-"}`);
     broadcastJson({ type: "task_event", entry });
-    await maybeSpeakTaskEvent(entry);
   }
 
   if (!fs.existsSync(HISTORY_PATH)) return;

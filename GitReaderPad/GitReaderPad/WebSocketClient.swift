@@ -4,17 +4,20 @@ import AVFoundation
 
 @Observable
 @MainActor
-final class WebSocketClient {
+final class WebSocketClient: NSObject, AVAudioPlayerDelegate {
     var lines: [String] = []
     var isConnected: Bool = false
 
     private let serverURL: URL
     private var audioPlayer: AVAudioPlayer?
+    private var pendingAudio: [Data] = []
+    private var isPlayingAudio: Bool = false
     private var diffLines: [String] = []
     private var liveEventLines: [String] = []
 
     init(serverURL: URL = URL(string: "ws://felixs-macbook-pro.tailcfdca5.ts.net:9876")!) {
         self.serverURL = serverURL
+        super.init()
     }
 
     func start() {
@@ -112,16 +115,49 @@ final class WebSocketClient {
     }
 
     private func playAudio(_ data: Data) {
-        log("[TTS] received audio: \(data.count) bytes")
+        pendingAudio.append(data)
+        log("[TTS] queued audio: \(data.count) bytes (pending=\(pendingAudio.count), playing=\(isPlayingAudio))")
+        drainAudioQueueIfNeeded()
+    }
+
+    private func drainAudioQueueIfNeeded() {
+        guard !isPlayingAudio, !pendingAudio.isEmpty else { return }
+
+        let data = pendingAudio.removeFirst()
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, mode: .spokenAudio)
             try session.setActive(true)
-            audioPlayer = try AVAudioPlayer(data: data)
-            audioPlayer?.play()
-            log("[TTS] playback started")
+
+            let player = try AVAudioPlayer(data: data)
+            player.delegate = self
+            audioPlayer = player
+            isPlayingAudio = true
+            player.play()
+            log("[TTS] playback started (remaining=\(pendingAudio.count))")
         } catch {
+            isPlayingAudio = false
+            audioPlayer = nil
             logError("[TTS] playback failed: \(error)")
+            drainAudioQueueIfNeeded()
+        }
+    }
+
+    nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        Task { @MainActor in
+            self.isPlayingAudio = false
+            self.audioPlayer = nil
+            log("[TTS] playback finished success=\(flag) (remaining=\(self.pendingAudio.count))")
+            self.drainAudioQueueIfNeeded()
+        }
+    }
+
+    nonisolated func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
+        Task { @MainActor in
+            self.isPlayingAudio = false
+            self.audioPlayer = nil
+            logError("[TTS] playback decode error: \(String(describing: error))")
+            self.drainAudioQueueIfNeeded()
         }
     }
 }
