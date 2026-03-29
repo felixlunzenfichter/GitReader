@@ -72,6 +72,20 @@ private struct DiffTextView: UIViewRepresentable {
 
     // 1:1 match with SpiralLayout.ts colorForLine()
     private func uiColorForLine(_ line: String) -> UIColor {
+        // Timeline row coloring by task status
+        if line.hasPrefix("# "), line.contains("[task_") {
+            let lower = line.lowercased()
+            if lower.contains("[running]") {
+                return UIColor(red: 0.90, green: 0.78, blue: 0.00, alpha: 1) // yellow
+            }
+            if lower.contains("[inactive]") {
+                return UIColor(red: 1.00, green: 0.55, blue: 0.00, alpha: 1) // orange
+            }
+            if lower.contains("[failed]") {
+                return UIColor(red: 0.92, green: 0.30, blue: 0.30, alpha: 1) // red
+            }
+        }
+
         if line.hasPrefix("#")  { return UIColor(red: 0.7, green: 0.4, blue: 0.9, alpha: 1) } // purple
         if line.hasPrefix("@@") { return UIColor(red: 0.3, green: 0.8, blue: 0.9, alpha: 1) } // cyan
         if line.hasPrefix("+")  { return UIColor(red: 0.3, green: 0.9, blue: 0.3, alpha: 1) } // green
