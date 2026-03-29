@@ -2,18 +2,18 @@
 
 This bridge makes native OpenClaw sub-agent runs visible in GitReader timeline + TTS by writing mapped events into `task-history.jsonl`.
 
-## Start event
+## Default launcher
+
+Use the wrapper so start events are never forgotten:
 
 ```bash
-node scripts/native-subagent-bridge.js start \
-  --task "Research native subagents" \
-  --session-key "agent:main:subagent:abc" \
-  --run-id "run-123" \
-  --model "opus-4.6" \
-  --runtime "subagent" \
-  --mode "run" \
-  --cwd "/Users/felixlunzenfichter/.openclaw/workspace" \
-  --branch "main"
+scripts/launch-native-subagent.sh \
+  "agent:main:subagent:abc" \
+  "run-123" \
+  "opus-4.6" \
+  "/Users/felixlunzenfichter/.openclaw/workspace" \
+  "main" \
+  "Research native subagents"
 ```
 
 ## Finish event
@@ -33,5 +33,6 @@ node scripts/native-subagent-bridge.js finish \
 ```
 
 ## Notes
-- `render.js` now shows `source`, `runtime`, `runId`, and `session_key` badges for timeline entries.
+- `render.js` shows `source`, `runtime`, `runId`, and `session_key` badges for timeline entries.
 - TTS works automatically because events are normalized to `task_started` / `task_finished`.
+- The wrapper exists to guarantee start-event visibility in UI/TTS for every native launch.
